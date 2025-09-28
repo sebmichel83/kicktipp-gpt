@@ -24,13 +24,14 @@ flowchart LR
 
   subgraph Bot
     O[Orchestrator]
-    P[Parser Agent<br/>+ Fuzzy Mapper]
-    PR[Predictor Agent<br/>GPT‑5 + Web Search]
-    S[Submit Agent<br/>+ Verify & Retry]
-    J[Persistence (Audit JSON)]
+    P["Parser Agent\n+ Fuzzy Mapper"]
+    PR["Predictor Agent\nGPT-5 + Web Search"]
+    S["Submit Agent\n+ Verify and Retry"]
+    J["Persistence (Audit JSON)"]
   end
 
-  TK <-- GET --> O
+  %% edges
+  TK <--|GET| O
   O --> P
   P --> PR
   PR --> J
@@ -38,6 +39,7 @@ flowchart LR
   S -->|POST| TForm
   S <--|GET verify| TForm
   O -->|loop 1..34| TK
+
 ```
 
 ### Agents (Conceptual Roles)
