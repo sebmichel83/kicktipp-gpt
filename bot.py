@@ -590,10 +590,70 @@ def call_openai_predictions_strict(matchday_index: int,
 
     n = len(rows)
 
+    hard_hints = [
+        "• Vermeide Serien gleicher Ergebnisse; 1:1 nur bei klarer Remis-Tendenz (Quoten/Analytics).",
+        "• P(H)+P(D)+P(A)=1±0.01; xG und O/U konsistent; Favoritensiege plausibel (2+ Tore, wenn Quoten stark).",
+        "• Quellen: 3–6 hochwertige Links mit Abrufzeit; falls unsicher: 'sources': [].",
+    ]
+
+    def _build_prompt(extra_hint: Optional[str] = None) -> str:
+        base = build_prompt_research(matchday_index, rows) if prompt_profile == "research" else build_prompt(matchday_index, rows)
+        if extra_hint:
+            return base + "\n" + extra_hint
+        return base
+
+    if prompt_profile == "research":
+        try:
+            from openai._base_client import make_request_options
+
+            prompt = _build_prompt(hard_hints[0])
+            log.info(
+                "OpenAI[responses] call: model=%s, md=%s, matches=%s, profile=%s (Websuche aktiv)",
+                model,
+                matchday_index,
+                n,
+                prompt_profile,
+            )
+            resp = client.responses.create(
+                model=model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
+                            "Nutze das Websuche-Tool für aktuelle Quoten und Quellen."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                tools=[{"type": "web_search"}],
+                temperature=temperature,
+                **make_request_options(timeout=timeout_s),
+            )
+
+            content_text = _responses_join_output_text(resp)
+            if raw_dir:
+                ensure_dir(raw_dir)
+                (raw_dir / f"md{matchday_index}_responses.json").write_text(content_text, encoding="utf-8")
+
+            data = _extract_json_object(content_text)
+            preds = data.get("predictions")
+            fixed = validate_predictions(preds, rows, matchday_index, forbid_degenerate=True)
+
+            for item in preds or []:
+                for s in (item.get("sources") or []):
+                    u = (s.get("url") or "").strip()
+                    if u and not re.match(r"^https?://", u):
+                        raise ValueError("Ungültige Quellen-URL erkannt.")
+            return fixed
+        except Exception as exc:
+            log.warning("Responses-Websuche fehlgeschlagen – nutze Chat-Fallback: %s", exc)
+
     # --- JSON-Schema: Pflichtfelder inkl. Research-Feldern (dürfen explizit null/leer sein)
 
     def nullable(schema: Dict) -> Dict:
-        return {"anyOf": [schema, {"type": "null"}]}
+        """Markiert ein Schema als optional, ohne die Objektstruktur zu verändern."""
+        return {"oneOf": [deepcopy(schema), {"type": "null"}]}
 
     def prob_field() -> Dict:
         return {"type": "number", "minimum": 0, "maximum": 1}
@@ -667,7 +727,16 @@ def call_openai_predictions_strict(matchday_index: int,
         "odds_used": nullable(odds_schema),
         "sources": nullable(sources_schema),
     }
-    required_keys = list(item_props.keys())
+    
+    required_keys = [
+        "row_index",
+        "matchday",
+        "home_team",
+        "away_team",
+        "predicted_home_goals",
+        "predicted_away_goals",
+        "reason",
+    ]
 
     schema = {
         "type": "object",
@@ -761,6 +830,7 @@ def call_openai_predictions_strict(matchday_index: int,
             log.warning("Research-Modus fehlgeschlagen – nutze Chat-Fallback: %s", exc)
 
     # Standard chat completions with retries
+
     last_err = None
     for attempt in range(1, max_retries + 1):
         prompt = _build_prompt("\n".join(hard_hints[:attempt]))
