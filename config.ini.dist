@@ -1,0 +1,32 @@
+[auth]
+username = username
+password = password
+
+[kicktipp]
+pool_slug = group_name
+tippsaison_id = 4000000
+
+[openai]
+api_key = sk-proj-... 
+model = gpt-5
+temperature = 1
+timeout = 1200
+prompt_profile = research
+use_web_search = true
+
+[run]
+logfile = kicktipp_bot.log
+verbose = true
+dry_run = false
+# proxy = http://user:pass@host:port
+
+[predictions]
+force_fill_all_open_games = true    
+# alle offenen Spiele müssen einen Tipp erhalten
+
+reject_degenerate_draws = true      
+# blockiere massenhaft 1:1-Ausgaben
+
+max_draw_share = 0.45               
+# >45% Remis = degenerate -> einmaliger Retry
+
