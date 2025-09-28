@@ -517,9 +517,20 @@ def call_openai_predictions_strict(matchday_index: int,
                 "home_win": {"type": "number", "minimum": 0, "maximum": 1},
                 "draw": {"type": "number", "minimum": 0, "maximum": 1},
                 "away_win": {"type": "number", "minimum": 0, "maximum": 1},
-                "over_2_5": {"type": "number", "minimum": 0, "maximum": 1},
-                "btts_yes": {"type": "number", "minimum": 0, "maximum": 1},
+                "over_2_5": {
+                    "anyOf": [
+                        {"type": "number", "minimum": 0, "maximum": 1},
+                        {"type": "null"},
+                    ]
+                },
+                "btts_yes": {
+                    "anyOf": [
+                        {"type": "number", "minimum": 0, "maximum": 1},
+                        {"type": "null"},
+                    ]
+                },
             },
+            "required": ["home_win", "draw", "away_win", "over_2_5", "btts_yes"],
         },
         "top_scorelines": {
             "type": "array",
@@ -542,6 +553,7 @@ def call_openai_predictions_strict(matchday_index: int,
                 "draw": {"type": ["number", "null"]},
                 "away": {"type": ["number", "null"]},
             },
+            "required": ["home", "draw", "away"],
         },
         "sources": {
             "type": "array",
@@ -549,9 +561,7 @@ def call_openai_predictions_strict(matchday_index: int,
                 "type": "object",
                 "additionalProperties": True,
                 "properties": {
-                    "title": {"type": "string"},
                     "url": {"type": "string"},
-                    "accessed": {"type": "string"},
                 },
                 "required": ["url"],
             },
