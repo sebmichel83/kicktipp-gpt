@@ -627,9 +627,17 @@ def call_openai_predictions_strict(matchday_index: int,
                     {"role": "user", "content": prompt},
                 ],
                 tools=[{"type": "web_search"}],
+                tool_choice={"type": "web_search"},
                 temperature=temperature,
                 **make_request_options(timeout=timeout_s),
             )
+
+            used, details = detect_web_search_usage(resp)
+            if used:
+                log.info("Websuche: JA | queries=%s | urls=%s", details["queries"][:3], details["urls"][:3])
+            else:
+                log.warning("Websuche: NEIN – Modell hat keine web_search-Calls ausgeführt.")
+
 
             content_text = _responses_join_output_text(resp)
             if raw_dir:
