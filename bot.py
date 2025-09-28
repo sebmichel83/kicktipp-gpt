@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import sys
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +58,62 @@ log = logging.getLogger("root")
 # -----------------------------------------------------------------------------
 # Utils
 # -----------------------------------------------------------------------------
+def _to_dict(resp_obj):
+    # robustes „to dict“ für verschiedene SDK-Versionen
+    for attr in ("to_dict", "model_dump", "dict"):
+        f = getattr(resp_obj, attr, None)
+        if callable(f):
+            try:
+                d = f()
+                # pydantic: model_dump kann kein reines dict sein
+                if hasattr(d, "items"):
+                    return d
+            except Exception:
+                pass
+    try:
+        # letzte Rettung: JSON roundtrip
+        return json.loads(getattr(resp_obj, "model_dump_json", lambda: json.dumps(resp_obj, default=str))())
+    except Exception:
+        return json.loads(json.dumps(resp_obj, default=str))
+
+def detect_web_search_usage(resp):
+    """
+    Liefert (used: bool, details: dict mit queries & urls), indem das Responses-Objekt
+    nach web_search_call-Blöcken / Quellen durchsucht wird.
+    """
+    d = _to_dict(resp)
+    output = d.get("output") or []
+    used = False
+    queries, urls = [], []
+
+    def walk(x):
+        nonlocal used
+        if isinstance(x, dict):
+            t = x.get("type") or x.get("event") or ""
+            if isinstance(t, str) and "web_search_call" in t:
+                used = True
+                # Versuche Query & Quellen aus häufigen Feldern zu ziehen
+                action = x.get("action") or {}
+                q = action.get("query") or action.get("search_query")
+                if q: queries.append(q)
+                # Ergebnisse/Quellen: je nach SDK-Fassung "sources" oder "results"
+                for item in (action.get("sources") or action.get("results") or []):
+                    u = item.get("url") or item.get("link")
+                    if u: urls.append(u)
+            # rekursiv
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    walk(output)
+    # Duplikate entfernen, Reihenfolge beibehalten
+    uq = list(dict.fromkeys(queries))
+    uu = list(dict.fromkeys(urls))
+    return used, {"queries": uq, "urls": uu}
+
+
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
@@ -677,6 +734,12 @@ def call_openai_predictions_strict(matchday_index: int,
                 },
                 temperature=temperature,
             )
+
+            used, details = detect_web_search_usage(resp)
+            if used:
+                log.info("Websuche: JA | queries=%s | urls=%s", details["queries"][:3], details["urls"][:3])
+            else:
+                log.warning("Websuche: NEIN – Modell hat keine web_search-Calls ausgeführt.")
 
             content = resp.choices[0].message.content if resp.choices else None
             if raw_dir:
