@@ -406,6 +406,8 @@ def build_prompt(matchday_index: int, rows: List[Row], hard_constraints_hint: st
     lines.append("  und jedes Item MUSS das Feld 'row_index' (1..N) enthalten.")
     lines.append("• Felder: row_index (int), matchday (int), home_team (string), away_team (string),")
     lines.append("  predicted_home_goals (int), predicted_away_goals (int), reason (<= 250 Zeichen).")
+    lines.append("• Zusätzliche Pflichtfelder (dürfen null/leer sein, müssen aber vorhanden sein):")
+    lines.append("  probabilities {home_win/draw/away_win/over_2_5/btts_yes}, top_scorelines [], odds_used {}, sources [].")
     lines.append("• Verwende die Teamnamen EXAKT wie angegeben (keine Abkürzungen).")
     lines.append("• Nutze Buchmacher-QUOTEN (H/D/A), aktuelle Form/News/Verletzungen und Analytics (xG/Elo) als Evidenz.")
     lines.append("• reason kurz: z. B. 'Odds 1.75 H; xG +0.3; Verletzung XY'.")
@@ -500,9 +502,10 @@ def call_openai_predictions_strict(matchday_index: int,
 
     n = len(rows)
 
-    # --- JSON-Schema: Pflichtfelder + optionale Research-Felder (dürfen fehlen oder Null sein)
+    # --- JSON-Schema: Pflichtfelder inkl. Research-Feldern (dürfen explizit null/leer sein)
+
     def nullable(schema: Dict) -> Dict:
-        return {"oneOf": [schema, {"type": "null"}]}
+        return {"anyOf": [schema, {"type": "null"}]}
 
     def prob_field() -> Dict:
         return {"type": "number", "minimum": 0, "maximum": 1}
@@ -543,6 +546,8 @@ def call_openai_predictions_strict(matchday_index: int,
 
     sources_schema = {
         "type": "array",
+        "minItems": 0,
+        "maxItems": 8,
         "items": {
             "type": "object",
             "additionalProperties": False,
@@ -554,8 +559,6 @@ def call_openai_predictions_strict(matchday_index: int,
             },
             "required": ["url"],
         },
-        "minItems": 0,
-        "maxItems": 8,
     }
 
     item_props = {
@@ -566,6 +569,7 @@ def call_openai_predictions_strict(matchday_index: int,
         "predicted_home_goals": {"type": "integer"},
         "predicted_away_goals": {"type": "integer"},
         "reason": {"type": "string", "maxLength": 250},
+
         # optional (research)
         "probabilities": {
             "type": "object",
@@ -628,6 +632,7 @@ def call_openai_predictions_strict(matchday_index: int,
             "minItems": 0, "maxItems": 8,
         },
     }
+    required_keys = list(item_props.keys())
 
     optional_keys = {"probabilities", "top_scorelines", "odds_used", "sources"}
     required_keys = [k for k in item_props.keys() if k not in optional_keys]
