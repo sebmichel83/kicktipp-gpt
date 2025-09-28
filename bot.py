@@ -406,6 +406,8 @@ def build_prompt(matchday_index: int, rows: List[Row], hard_constraints_hint: st
     lines.append("  und jedes Item MUSS das Feld 'row_index' (1..N) enthalten.")
     lines.append("• Felder: row_index (int), matchday (int), home_team (string), away_team (string),")
     lines.append("  predicted_home_goals (int), predicted_away_goals (int), reason (<= 250 Zeichen).")
+    lines.append("• Zusätzliche Pflichtfelder (dürfen null/leer sein, müssen aber vorhanden sein):")
+    lines.append("  probabilities {home_win/draw/away_win/over_2_5/btts_yes}, top_scorelines [], odds_used {}, sources [].")
     lines.append("• Verwende die Teamnamen EXAKT wie angegeben (keine Abkürzungen).")
     lines.append("• Nutze Buchmacher-QUOTEN (H/D/A), aktuelle Form/News/Verletzungen und Analytics (xG/Elo) als Evidenz.")
     lines.append("• reason kurz: z. B. 'Odds 1.75 H; xG +0.3; Verletzung XY'.")
@@ -500,7 +502,65 @@ def call_openai_predictions_strict(matchday_index: int,
 
     n = len(rows)
 
-    # --- JSON-Schema: Pflichtfelder + optionale Research-Felder (dürfen fehlen oder Null sein)
+    # --- JSON-Schema: Pflichtfelder inkl. Research-Feldern (dürfen explizit null/leer sein)
+
+    def nullable(schema: Dict) -> Dict:
+        return {"anyOf": [schema, {"type": "null"}]}
+
+    def prob_field() -> Dict:
+        return {"type": "number", "minimum": 0, "maximum": 1}
+
+    probabilities_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "home_win": prob_field(),
+            "draw": prob_field(),
+            "away_win": prob_field(),
+            "over_2_5": nullable(prob_field()),
+            "btts_yes": nullable(prob_field()),
+        },
+        "required": ["home_win", "draw", "away_win", "over_2_5", "btts_yes"],
+    }
+
+    scoreline_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "score": {"type": "string"},
+            "p": prob_field(),
+        },
+        "required": ["score", "p"],
+    }
+
+    odds_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "home": nullable({"type": "number"}),
+            "draw": nullable({"type": "number"}),
+            "away": nullable({"type": "number"}),
+        },
+        "required": ["home", "draw", "away"],
+    }
+
+    sources_schema = {
+        "type": "array",
+        "minItems": 0,
+        "maxItems": 8,
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "url": {"type": "string"},
+            },
+            "patternProperties": {
+                "^(title|accessed|note)$": {"type": "string"},
+            },
+            "required": ["url"],
+        },
+    }
+
     item_props = {
         "row_index": {"type": "integer", "minimum": 1, "maximum": n},
         "matchday": {"type": "integer"},
@@ -509,6 +569,15 @@ def call_openai_predictions_strict(matchday_index: int,
         "predicted_home_goals": {"type": "integer"},
         "predicted_away_goals": {"type": "integer"},
         "reason": {"type": "string", "maxLength": 250},
+        "probabilities": nullable(probabilities_schema),
+        "top_scorelines": nullable({
+            "type": "array",
+            "items": scoreline_schema,
+            "minItems": 0,
+            "maxItems": 3,
+        }),
+        "odds_used": nullable(odds_schema),
+        "sources": nullable(sources_schema),
     }
     required_keys = list(item_props.keys())
 
@@ -522,7 +591,7 @@ def call_openai_predictions_strict(matchday_index: int,
                 "maxItems": n,
                 "items": {
                     "type": "object",
-                    "additionalProperties": True,
+                    "additionalProperties": False,
                     "properties": item_props,
                     "required": required_keys,
                 },
