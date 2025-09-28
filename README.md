@@ -1,4 +1,4 @@
-# kicktipp-gpt
+# Kicktipp-GPT Bot
 
 Automatisierte Tippabgabe für Kicktipp-Spielrunden mit einer OpenAI-gestützten
 Prognose-Pipeline. Das Projekt sammelt die offenen Spiele eines Spieltages,
