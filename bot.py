@@ -500,7 +500,64 @@ def call_openai_predictions_strict(matchday_index: int,
 
     n = len(rows)
 
-    # --- JSON-Schema: Pflichtfelder + optionale Research-Felder (dürfen Null/leer sein)
+    # --- JSON-Schema: Pflichtfelder + optionale Research-Felder (dürfen fehlen oder Null sein)
+    def nullable(schema: Dict) -> Dict:
+        return {"oneOf": [schema, {"type": "null"}]}
+
+    def prob_field() -> Dict:
+        return {"type": "number", "minimum": 0, "maximum": 1}
+
+    probabilities_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "home_win": prob_field(),
+            "draw": prob_field(),
+            "away_win": prob_field(),
+            "over_2_5": nullable(prob_field()),
+            "btts_yes": nullable(prob_field()),
+        },
+        "required": ["home_win", "draw", "away_win", "over_2_5", "btts_yes"],
+    }
+
+    scoreline_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "score": {"type": "string"},
+            "p": prob_field(),
+        },
+        "required": ["score", "p"],
+    }
+
+    odds_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "home": nullable({"type": "number"}),
+            "draw": nullable({"type": "number"}),
+            "away": nullable({"type": "number"}),
+        },
+        "required": ["home", "draw", "away"],
+    }
+
+    sources_schema = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "url": {"type": "string"},
+            },
+            "patternProperties": {
+                "^(title|accessed|note)$": {"type": "string"},
+            },
+            "required": ["url"],
+        },
+        "minItems": 0,
+        "maxItems": 8,
+    }
+
     item_props = {
         "row_index": {"type": "integer", "minimum": 1, "maximum": n},
         "matchday": {"type": "integer"},
@@ -510,69 +567,19 @@ def call_openai_predictions_strict(matchday_index: int,
         "predicted_away_goals": {"type": "integer"},
         "reason": {"type": "string", "maxLength": 250},
         # optional (research)
-        "probabilities": {
-            "type": ["object", "null"],
-            "additionalProperties": False,
-            "properties": {
-                "home_win": {"type": "number", "minimum": 0, "maximum": 1},
-                "draw": {"type": "number", "minimum": 0, "maximum": 1},
-                "away_win": {"type": "number", "minimum": 0, "maximum": 1},
-                "over_2_5": {
-                    "anyOf": [
-                        {"type": "number", "minimum": 0, "maximum": 1},
-                        {"type": "null"},
-                    ]
-                },
-                "btts_yes": {
-                    "anyOf": [
-                        {"type": "number", "minimum": 0, "maximum": 1},
-                        {"type": "null"},
-                    ]
-                },
-            },
-            "required": ["home_win", "draw", "away_win", "over_2_5", "btts_yes"],
-        },
-        "top_scorelines": {
-            "type": ["array", "null"],
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "score": {"type": "string"},
-                    "p": {"type": "number", "minimum": 0, "maximum": 1},
-                },
-                "required": ["score", "p"],
-            },
-            "minItems": 0, "maxItems": 3,
-        },
-        "odds_used": {
-            "type": ["object", "null"],
-            "additionalProperties": False,
-            "properties": {
-                "home": {"type": ["number", "null"]},
-                "draw": {"type": ["number", "null"]},
-                "away": {"type": ["number", "null"]},
-            },
-            "required": ["home", "draw", "away"],
-        },
-        "sources": {
-            "type": ["array", "null"],
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "url": {"type": "string"},
-                },
-                "patternProperties": {
-                    "^(title|accessed|note)$": {"type": "string"},
-                },
-                "required": ["url"],
-            },
-            "minItems": 0, "maxItems": 8,
-        },
+        "probabilities": nullable(probabilities_schema),
+        "top_scorelines": nullable({
+            "type": "array",
+            "items": scoreline_schema,
+            "minItems": 0,
+            "maxItems": 3,
+        }),
+        "odds_used": nullable(odds_schema),
+        "sources": nullable(sources_schema),
     }
 
-    required_keys = list(item_props.keys())
+    optional_keys = {"probabilities", "top_scorelines", "odds_used", "sources"}
+    required_keys = [k for k in item_props.keys() if k not in optional_keys]
 
     schema = {
         "type": "object",
