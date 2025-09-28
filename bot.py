@@ -2,15 +2,17 @@
 # -*- coding: utf-8 -*-
 
 """
-Kicktipp Predictor — STRICT mode:
-- Holt pro Spieltag N Paarungen direkt aus dem Formular.
-- Fragt OpenAI (Chat Completions, JSON-Schema) so lange neu an (mit verschärftem Prompt),
-  bis GENAU N gültige Items vorliegen (row_index 1..N, Namen/Index korrekt, keine Degeneration).
-- KEIN 1:1-Fallback; KEINE Heuristik (außer explizit erlaubt).
-- Schreibt die Tipps INS PORTAL und verifiziert durch Reload.
-- Loggt die Rohantwort(en) in out/raw_openai/ zur Diagnose.
+Kicktipp Predictor — STRICT mode (Responses API + optional Websuche)
 
-Wenn OpenAI nicht liefert oder Ausgabe unbrauchbar ist: Abbruch mit klarer Fehlermeldung.
+This build fixes:
+- OpenAI Chat JSON schema 400s: item schema has additionalProperties=false (strict mode requirement)
+- Avoid useless web_search when team names are placeholders ("Heim/Gast"): skip to Chat fallback
+- Much stronger team-name extraction around inputs (attributes, <label>, nearest <tr>, logos)
+- Responses API still without response_format (unsupported in your SDK)
+- Robust logging and raw dumps for auditability
+
+Run:
+  python3 bot.py --config config.ini
 """
 
 from __future__ import annotations
@@ -22,12 +24,11 @@ import logging
 import os
 import re
 import sys
-import json
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlencode, urljoin, urlparse, parse_qs
+from urllib.parse import urlencode, urljoin
 
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -54,69 +55,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("root")
 
-
 # -----------------------------------------------------------------------------
-# Utils
+# Helpers
 # -----------------------------------------------------------------------------
-def _to_dict(resp_obj):
-    # robustes „to dict“ für verschiedene SDK-Versionen
-    for attr in ("to_dict", "model_dump", "dict"):
-        f = getattr(resp_obj, attr, None)
-        if callable(f):
-            try:
-                d = f()
-                # pydantic: model_dump kann kein reines dict sein
-                if hasattr(d, "items"):
-                    return d
-            except Exception:
-                pass
-    try:
-        # letzte Rettung: JSON roundtrip
-        return json.loads(getattr(resp_obj, "model_dump_json", lambda: json.dumps(resp_obj, default=str))())
-    except Exception:
-        return json.loads(json.dumps(resp_obj, default=str))
-
-def detect_web_search_usage(resp):
-    """
-    Liefert (used: bool, details: dict mit queries & urls), indem das Responses-Objekt
-    nach web_search_call-Blöcken / Quellen durchsucht wird.
-    """
-    d = _to_dict(resp)
-    output = d.get("output") or []
-    used = False
-    queries, urls = [], []
-
-    def walk(x):
-        nonlocal used
-        if isinstance(x, dict):
-            t = x.get("type") or x.get("event") or ""
-            if isinstance(t, str) and "web_search_call" in t:
-                used = True
-                # Versuche Query & Quellen aus häufigen Feldern zu ziehen
-                action = x.get("action") or {}
-                q = action.get("query") or action.get("search_query")
-                if q: queries.append(q)
-                # Ergebnisse/Quellen: je nach SDK-Fassung "sources" oder "results"
-                for item in (action.get("sources") or action.get("results") or []):
-                    u = item.get("url") or item.get("link")
-                    if u: urls.append(u)
-            # rekursiv
-            for v in x.values():
-                walk(v)
-        elif isinstance(x, list):
-            for v in x:
-                walk(v)
-
-    walk(output)
-    # Duplikate entfernen, Reihenfolge beibehalten
-    uq = list(dict.fromkeys(queries))
-    uu = list(dict.fromkeys(urls))
-    return used, {"queries": uq, "urls": uu}
-
-
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
-
 
 def write_json(path: Path, data) -> None:
     ensure_dir(path.parent)
@@ -124,43 +67,12 @@ def write_json(path: Path, data) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
     log.info(f"Datei geschrieben: {path.resolve()}")
 
-
-def _responses_join_output_text(resp) -> str:
-    """Fügt segmentierte Responses-Ausgaben zu einem Text zusammen."""
-    try:
-        chunks = getattr(resp, "output", None) or []
-        parts = []
-        for ch in chunks:
-            if getattr(ch, "type", "") == "output_text":
-                parts.append(getattr(ch, "text", ""))
-        if parts:
-            return "\n".join(parts)
-    except Exception:
-        pass
-    return getattr(resp, "output_text", None) or str(resp)
-
-
-def _extract_json_object(text: str) -> Dict:
-    """Extrahiert das erste JSON-Objekt aus einem gegebenen Text."""
-    if not text:
-        raise ValueError("Leere Modellantwort.")
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{[\s\S]*\}", text)
-    if match:
-        return json.loads(match.group(0))
-    raise ValueError("Konnte kein JSON-Objekt in der Antwort finden.")
-
-
 def mask_secret(s: Optional[str], keep: int = 3) -> str:
     if not s:
         return ""
     if len(s) <= keep * 2:
         return "*" * len(s)
     return f"{s[:keep]}…{s[-keep:]}"
-
 
 def parse_float_maybe(s: Optional[str]) -> Optional[float]:
     if s is None:
@@ -173,15 +85,54 @@ def parse_float_maybe(s: Optional[str]) -> Optional[float]:
     except Exception:
         return None
 
-
 def odds_to_str(h: Optional[float], d: Optional[float], a: Optional[float]) -> str:
     def fmt(x: Optional[float]) -> str:
         return "-" if x is None else str(x).rstrip("0").rstrip(".")
     return f"{fmt(h)}/{fmt(d)}/{fmt(a)}"
 
+def _responses_join_output_text(resp) -> str:
+    """
+    Join Responses API textual output blocks into a single string.
+    """
+    try:
+        txt = getattr(resp, "output_text", None)
+        if isinstance(txt, str) and txt.strip():
+            return txt
+        chunks = getattr(resp, "output", None) or []
+        parts = []
+        for ch in chunks:
+            if isinstance(ch, dict):
+                if ch.get("type") == "output_text" and isinstance(ch.get("text"), str):
+                    parts.append(ch["text"])
+            else:
+                if getattr(ch, "type", "") == "output_text":
+                    parts.append(getattr(ch, "text", ""))
+        if parts:
+            return "\n".join(parts)
+    except Exception:
+        pass
+    try:
+        return json.dumps(resp, default=str)
+    except Exception:
+        return str(resp)
+
+def _extract_json_object(text: str) -> Dict:
+    """
+    Extract the first JSON object from text (raw or fenced).
+    """
+    if not text:
+        raise ValueError("Leere Modellantwort.")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r"\{[\s\S]*\}", text)
+    if m:
+        return json.loads(m.group(0))
+    raise ValueError("Konnte kein JSON-Objekt in der Antwort finden.")
 
 # -----------------------------------------------------------------------------
-# Config
+# Config helpers
 # -----------------------------------------------------------------------------
 def parse_bool(v: Optional[str], default: bool = False) -> bool:
     if isinstance(v, bool):
@@ -189,7 +140,6 @@ def parse_bool(v: Optional[str], default: bool = False) -> bool:
     if v is None:
         return default
     return str(v).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
-
 
 def load_config(path: Optional[str]) -> Optional[configparser.ConfigParser]:
     p = Path(path or "config.ini")
@@ -201,7 +151,6 @@ def load_config(path: Optional[str]) -> Optional[configparser.ConfigParser]:
     log.info(f"Config geladen: {p.resolve()}")
     return cfg
 
-
 def get_ini_value(cfg, keys: List[str], sections: List[str]) -> Optional[str]:
     if cfg is None:
         return None
@@ -212,7 +161,6 @@ def get_ini_value(cfg, keys: List[str], sections: List[str]) -> Optional[str]:
                 if k in sect and str(sect[k]).strip():
                     return str(sect[k]).strip()
     return None
-
 
 def resolve_value(cli_val,
                   env_keys: List[str],
@@ -240,7 +188,6 @@ def resolve_value(cli_val,
             return default
     return default
 
-
 # -----------------------------------------------------------------------------
 # HTTP
 # -----------------------------------------------------------------------------
@@ -254,7 +201,6 @@ def new_session(proxy: Optional[str] = None) -> requests.Session:
         s.proxies.update({"http": proxy, "https": proxy})
     return s
 
-
 def login(session: requests.Session, username: str, password: str) -> None:
     r = session.get(f"{BASE_URL}/info/profil/login", timeout=15)
     r.raise_for_status()
@@ -264,7 +210,6 @@ def login(session: requests.Session, username: str, password: str) -> None:
     r3 = session.get(f"{BASE_URL}/info/profil/", timeout=15)
     ok = ("logout" in r3.text.lower()) or ("abmelden" in r3.text.lower())
     log.info("Login scheint erfolgreich (Logout-Link erkannt)." if ok else "Login evtl. NICHT erfolgreich – fahre dennoch fort.")
-
 
 def fetch_tippabgabe(session: requests.Session, pool_slug: str, spieltag_index: int,
                      tippsaison_id: Optional[str]) -> Tuple[str, str]:
@@ -276,7 +221,6 @@ def fetch_tippabgabe(session: requests.Session, pool_slug: str, spieltag_index: 
     r = session.get(url, timeout=25)
     r.raise_for_status()
     return r.text, r.url
-
 
 # -----------------------------------------------------------------------------
 # Form parsing
@@ -292,7 +236,6 @@ class Row:
     home_odds: Optional[float]
     draw_odds: Optional[float]
     away_odds: Optional[float]
-
 
 def _candidate_score_inputs(form: Tag) -> List[Tag]:
     cands: List[Tag] = []
@@ -311,13 +254,11 @@ def _candidate_score_inputs(form: Tag) -> List[Tag]:
             cands.append(inp)
     return cands
 
-
 def _stem(name: str) -> str:
     s = re.sub(r"(heim|home|h|gast|away|a)", "", name, flags=re.IGNORECASE)
     s = re.sub(r"\d+", "", s)
     s = s.strip("[]()._- ")
     return s.lower()
-
 
 def _group_inputs_by_stem(cands: List[Tag]) -> Dict[str, List[Tag]]:
     groups: Dict[str, List[Tag]] = {}
@@ -326,7 +267,6 @@ def _group_inputs_by_stem(cands: List[Tag]) -> Dict[str, List[Tag]]:
         groups.setdefault(st, []).append(inp)
     return groups
 
-
 def _nearest_common_container(a: Tag, b: Tag) -> Tag:
     a_parents = list(a.parents)
     for anc in a_parents:
@@ -334,14 +274,12 @@ def _nearest_common_container(a: Tag, b: Tag) -> Tag:
             return anc
     return a.parent
 
-
 def _extract_text(el: Tag, selectors: List[str]) -> Optional[str]:
     for s in selectors:
         node = el.select_one(s)
         if node and node.get_text(strip=True):
             return node.get_text(strip=True)
     return None
-
 
 def _extract_odds_from_el(el: Tag) -> Tuple[Optional[float], Optional[float], Optional[float]]:
     text = " ".join(el.stripped_strings)
@@ -358,26 +296,94 @@ def _extract_odds_from_el(el: Tag) -> Tuple[Optional[float], Optional[float], Op
             ho, do, ao = nums[0], nums[1], nums[2]
     return ho, do, ao
 
+# --- NEW: stronger team-name extraction --------------------------------------
+BAD_TOKENS = {"tipp", "joker", "punkte", "quote", "remis", "heim", "gast", "home", "away", "vs", ":"}
 
-def _team_names_from_container(container: Tag) -> Tuple[str, str]:
-    home = _extract_text(container, [".heim", ".home", ".team-heim", ".teamhome", "td.heim", "[data-home]"])
-    away = _extract_text(container, [".gast", ".away", ".team-gast", ".teamaway", "td.gast", "[data-away]"])
-    if not home or not away:
-        alts = [img.get("alt", "").strip() for img in container.select("img[alt]")]
-        alts = [a for a in alts if a and not re.fullmatch(r"\d+", a)]
-        if len(alts) >= 2:
-            home = home or alts[0]
-            away = away or alts[1]
-    if not home or not away:
-        texts = [t.strip() for t in container.stripped_strings if len(t.strip()) >= 2]
-        bad = {"tipp", "joker", "punkte", "quote", "remis", "heim", "gast"}
-        texts = [t for t in texts if t.lower() not in bad]
-        if len(texts) >= 2:
-            home = home or texts[0]
-            away = away or texts[1]
-    return home or "Heim", away or "Gast"
+def _label_text_for_input(soup: BeautifulSoup, inp: Tag) -> Optional[str]:
+    inp_id = inp.get("id")
+    if inp_id:
+        lab = soup.select_one(f'label[for="{inp_id}"]')
+        if lab and lab.get_text(strip=True):
+            return lab.get_text(strip=True)
+    # aria-labelledby
+    lbl = inp.get("aria-labelledby")
+    if lbl:
+        lab = soup.select_one(f'#{lbl}')
+        if lab and lab.get_text(strip=True):
+            return lab.get_text(strip=True)
+    return None
 
+def _attrib_name(inp: Tag) -> Optional[str]:
+    # Try rich attributes
+    for k in ["data-team", "data-verein", "data-home-team", "data-away-team",
+              "data-team-name", "data-name", "aria-label", "title", "placeholder"]:
+        v = (inp.get(k) or "").strip()
+        if v and v.lower() not in {"heim", "gast", "home", "away"}:
+            return v
+    return None
 
+def _nearest_tr(el: Tag) -> Optional[Tag]:
+    p = el
+    for _ in range(0, 8):
+        if not p or not isinstance(p, Tag):
+            break
+        if p.name == "tr":
+            return p
+        p = p.parent
+    return None
+
+def _choose_two_names(texts: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    cand = [t.strip() for t in texts if t and t.strip() and t.strip().lower() not in BAD_TOKENS and not re.fullmatch(r"\d+", t.strip())]
+    # remove dupes, keep order
+    uniq = list(dict.fromkeys(cand))
+    if len(uniq) >= 2:
+        return uniq[0], uniq[1]
+    if len(uniq) == 1:
+        return uniq[0], None
+    return None, None
+
+def _team_names_from_inputs(soup: BeautifulSoup, container: Tag, home_inp: Tag, away_inp: Tag) -> Tuple[str, str]:
+    # 1) Direct attributes on inputs
+    h = _attrib_name(home_inp)
+    a = _attrib_name(away_inp)
+    if h and a:
+        return h, a
+    # 2) Labels bound to inputs
+    lh = _label_text_for_input(soup, home_inp)
+    la = _label_text_for_input(soup, away_inp)
+    if lh and la:
+        return lh, la
+    # 3) Tight container hints
+    home = _extract_text(container, [".heim", ".home", ".team-heim", ".teamhome", "[data-home]"])
+    away = _extract_text(container, [".gast", ".away", ".team-gast", ".teamaway", "[data-away]"])
+    if home and away and (home.lower() not in {"heim","home"} and away.lower() not in {"gast","away"}):
+        return home, away
+    # 4) Nearest <tr> scanning: logos, anchors, spans with textual names
+    tr = _nearest_tr(container) or _nearest_tr(home_inp) or _nearest_tr(away_inp) or container
+    texts: List[str] = []
+    # logo alts
+    for img in tr.select("img[alt]"):
+        alt = img.get("alt", "").strip()
+        if alt:
+            texts.append(alt)
+    # anchors/title
+    for an in tr.select("a[title],abbr[title],span[title]"):
+        t = (an.get("title") or "").strip()
+        if t:
+            texts.append(t)
+    # plain texts
+    texts.extend([t.strip() for t in tr.stripped_strings if t and len(t.strip()) >= 2])
+    h2, a2 = _choose_two_names(texts)
+    if h2 and a2:
+        return h2, a2
+    # 5) Global fallback: still try tight container texts
+    texts2 = [t.strip() for t in container.stripped_strings if t and len(t.strip()) >= 2]
+    h3, a3 = _choose_two_names(texts2)
+    return (h3 or "Heim"), (a3 or "Gast")
+
+# -----------------------------------------------------------------------------
+# Parse rows
+# -----------------------------------------------------------------------------
 def parse_rows_from_form(html: str) -> Tuple[List[Row], BeautifulSoup, Optional[Tag]]:
     soup = BeautifulSoup(html, "html.parser")
     form: Optional[Tag] = None
@@ -399,7 +405,7 @@ def parse_rows_from_form(html: str) -> Tuple[List[Row], BeautifulSoup, Optional[
     pairs: List[Tuple[Tag, Tag, Tag]] = []
     used = set()
 
-    for stem, lst in by_stem.items():
+    for _, lst in by_stem.items():
         lst = [i for i in lst if i not in used]
         if len(lst) >= 2:
             inp1, inp2 = lst[0], lst[1]
@@ -422,7 +428,7 @@ def parse_rows_from_form(html: str) -> Tuple[List[Row], BeautifulSoup, Optional[
         name_b = (b.get("name") or "").lower()
         is_a_home = any(k in name_a for k in ["heim", "home", "h"]) or not any(k in name_b for k in ["heim", "home", "h"])
         home_inp, away_inp = (a, b) if is_a_home else (b, a)
-        home_name, away_name = _team_names_from_container(container)
+        home_name, away_name = _team_names_from_inputs(soup, container, home_inp, away_inp)
         ho, do, ao = _extract_odds_from_el(container)
         open_row = not (home_inp.has_attr("disabled") or away_inp.has_attr("disabled"))
         rows.append(Row(
@@ -433,47 +439,26 @@ def parse_rows_from_form(html: str) -> Tuple[List[Row], BeautifulSoup, Optional[
         ))
         idx += 1
 
-    if len(rows) > 9:
+    if len(rows) > 9:  # Kicktipp Bundesliga
         rows = rows[:9]
     return rows, soup, form
 
-
 # -----------------------------------------------------------------------------
-# Prompt & OpenAI
+# Prompt
 # -----------------------------------------------------------------------------
 def build_prompt_research(matchday_index: int, rows: List[Row]) -> str:
-    """
-    FootballPred-Style Prompt (kompakt) – erzwingt evidenzbasierte Prognosen
-    mit Quoten-/Analytics-Bezug und Quellenangaben, Ausgabe bleibt predictions[].
-    """
     lines = []
-    # Rolle & Ziele
     lines.append("Du bist FootballPred LLM, ein sachlicher, quellengestützter Prognose-Assistent für Vereinsfußball.")
-    lines.append("Ziele: (1) Ergebnisprognose je Spiel (Heimtore/Auswärtstore), (2) interne Ableitung aus Quoten, xG-/Elo-/Formdaten,")
-    lines.append("Verletzungen/Sperren, vorauss. Aufstellungen und Kontext (Heimvorteil, Reisestrapazen, Spieldichte).")
-    # Prinzipien
-    lines.append("Prinzipien: Evidenzbasiert; Unsicherheit transparent; Konsistenzprüfungen; KEINE Wettaufforderung.")
-    lines.append("Nutze das verfügbare Websuche-Tool aktiv (Quoten, Verletzungen, Form, Wetter) und zitiere Quellen.")
-    # Format
+    lines.append("Ziele: je Spiel ein konkretes Ergebnis (Heim-/Auswärtstore) auf Basis von Quoten (overround-bereinigt),")
+    lines.append("xG-/Elo-/Formdaten, Verletzungen/Sperren, vorauss. Aufstellungen, Heimvorteil/Kontext.")
+    lines.append("Nutze das Websuche-Tool aktiv und zitiere Quellen (URLs).")
     lines.append("AUSGABEFORMAT (zwingend):")
     lines.append("{ 'predictions': [ {"
                  " 'row_index': int(1..N), 'matchday': int, 'home_team': str, 'away_team': str,"
-                 " 'predicted_home_goals': int, 'predicted_away_goals': int, 'reason': str(<=250),"
-                 " 'probabilities': { 'home_win': float[0..1], 'draw': float[0..1], 'away_win': float[0..1],"
-                 "                     'over_2_5': float[0..1], 'btts_yes': float[0..1] },"
-                 " 'top_scorelines': [ {'score': 'H-A', 'p': float}, ... ] (max 3),"
-                 " 'odds_used': { 'home': float|null, 'draw': float|null, 'away': float|null },"
-                 " 'sources': [ {'title': str, 'url': str, 'accessed': str}, ... ] (3–6 Einträge, falls verfügbar)"
+                 " 'predicted_home_goals': int, 'predicted_away_goals': int, 'reason': str(<=250)"
                  " } ... ] }")
-    lines.append("Strikte Regeln:")
-    lines.append("• Gib NUR das JSON-Objekt mit dem Schlüssel 'predictions' aus (keine Einleitung/Erklärung).")
-    lines.append("• EXACT gleiche Reihenfolge wie gelistet, mit 'row_index' 1..N; Teamnamen EXAKT übernehmen.")
-    lines.append("• Nutze Markt-Quoten (Overround bereinigt), xG-/Elo-Baselines, Form (letzte 10), Heim/Auswärts-Splits,")
-    lines.append("  Verletzungen/Sperren, Torwart-Form, Taktikmatchups. Begründung kurz & evidenzbasiert (Odds + 1–2 Treiber).")
-    lines.append("• Konsistenz: P(H)+P(D)+P(A)=1±0.01; keine Serien gleicher Ergebnisse; 1:1 nur wenn Quoten/Analytics Remis nahelegen.")
-    lines.append("• Quellen: hochwertige Domains (Liga/Clubs/seriöse Stats). Gib URL + Abrufzeit an.")
-    lines.append("• Wenn keine aktuellen Webdaten verfüg- oder sicher sind, setze 'sources': [] und nutze nur die Quoten + generische Baselines.")
-    # Spieltag & Paarungen
+    lines.append("Regeln: Nur JSON; exakt N Items in gelisteter Reihenfolge; Teamnamen exakt; keine Serien gleicher Ergebnisse;")
+    lines.append("1:1 nur bei klarer Remis-Tendenz; P(H)+P(D)+P(A)=1±0.01 (intern).")
     lines.append(f"\nSpieltag: {matchday_index}")
     lines.append("Spiele (index) Heim → Auswärts | Quoten H/D/A | Status:")
     for r in rows:
@@ -482,49 +467,20 @@ def build_prompt_research(matchday_index: int, rows: List[Row]) -> str:
     lines.append("\nGib ausschließlich das JSON-Objekt mit 'predictions' zurück.")
     return "\n".join(lines)
 
-
-def build_prompt(matchday_index: int, rows: List[Row], hard_constraints_hint: str = "") -> str:
-    lines = []
-    lines.append("Du bist ein Fußball-Experte und KI-Modell.")
-    lines.append("Aufgabe: Gib konkrete Ergebnisprognosen für den angegebenen Spieltag der Bundesliga-Saison 2025/26 zurück.")
-    lines.append("")
-    lines.append("⚙️ STRIKTE Vorgaben:")
-    lines.append("• Gib NUR ein JSON-Objekt mit Schlüssel 'predictions' zurück (ohne Einleitung/Erklärung).")
-    lines.append("• Es MÜSSEN genau N Items (N = Anzahl gelisteter Spiele) zurückkommen, in GLEICHER REIHENFOLGE,")
-    lines.append("  und jedes Item MUSS das Feld 'row_index' (1..N) enthalten.")
-    lines.append("• Felder: row_index (int), matchday (int), home_team (string), away_team (string),")
-    lines.append("  predicted_home_goals (int), predicted_away_goals (int), reason (<= 250 Zeichen).")
-    lines.append("• Zusätzliche Pflichtfelder (dürfen null/leer sein, müssen aber vorhanden sein):")
-    lines.append("  probabilities {home_win/draw/away_win/over_2_5/btts_yes}, top_scorelines [], odds_used {}, sources [].")
-    lines.append("• Verwende die Teamnamen EXAKT wie angegeben (keine Abkürzungen).")
-    lines.append("• Nutze Buchmacher-QUOTEN (H/D/A), aktuelle Form/News/Verletzungen und Analytics (xG/Elo) als Evidenz.")
-    lines.append("• reason kurz: z. B. 'Odds 1.75 H; xG +0.3; Verletzung XY'.")
-    lines.append("• Vermeide gleichförmige Ergebnisse; richte dich an den Quoten aus (kein 1:1 als Standard).")
-    if hard_constraints_hint:
-        lines.append(hard_constraints_hint)
-    lines.append("")
-    lines.append(f"Spieltag: {matchday_index}")
-    lines.append("Spiele (index) Heim → Auswärts | Quoten H/D/A | Status:")
-    for r in rows:
-        status = "offen" if r.open else "geschlossen"
-        lines.append(f"{r.index}) {r.home_team} vs {r.away_team} | Quoten: {odds_to_str(r.home_odds, r.draw_odds, r.away_odds)} | {status}")
-    lines.append("")
-    lines.append("Gib ausschließlich ein JSON-Objekt mit 'predictions' zurück; keine weiteren Texte.")
-    return "\n".join(lines)
-
-
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
 def validate_predictions(preds: List[Dict], rows: List[Row], matchday: int,
                          forbid_degenerate: bool = True) -> List[Dict]:
     n = len(rows)
     if not isinstance(preds, list) or len(preds) != n:
         raise ValueError(f"Erwarte genau {n} Items, erhalten: {len(preds) if isinstance(preds, list) else 'kein Array'}.")
 
-    # Map rows by index
     row_by_idx = {r.index: r for r in rows}
     seen = set()
     degenerate_same = 0
-
     fixed: List[Dict] = []
+
     for p in preds:
         if not isinstance(p, dict):
             raise ValueError("Ein Item ist kein Objekt.")
@@ -536,18 +492,12 @@ def validate_predictions(preds: List[Dict], rows: List[Row], matchday: int,
         seen.add(ri)
 
         r = row_by_idx[ri]
-        # Namen exakt erzwingen
-        p["home_team"] = r.home_team
-        p["away_team"] = r.away_team
-        p["matchday"] = matchday
-
         try:
             hg = int(p["predicted_home_goals"])
             ag = int(p["predicted_away_goals"])
         except Exception:
             raise ValueError("predicted_*_goals nicht integer.")
-
-        if hg < 0 or hg > 9 or ag < 0 or ag > 9:
+        if not (0 <= hg <= 9 and 0 <= ag <= 9):
             raise ValueError("predicted goals außerhalb 0..9.")
 
         if hg == 1 and ag == 1:
@@ -569,7 +519,69 @@ def validate_predictions(preds: List[Dict], rows: List[Row], matchday: int,
 
     return fixed
 
+# -----------------------------------------------------------------------------
+# Responses web_search detection
+# -----------------------------------------------------------------------------
+def _to_dict(resp_obj):
+    for attr in ("to_dict", "model_dump", "dict"):
+        f = getattr(resp_obj, attr, None)
+        if callable(f):
+            try:
+                d = f()
+                if hasattr(d, "items"):
+                    return d
+            except Exception:
+                pass
+    try:
+        return json.loads(getattr(resp_obj, "model_dump_json", lambda: json.dumps(resp_obj, default=str))())
+    except Exception:
+        return json.loads(json.dumps(resp_obj, default=str))
 
+def detect_web_search_usage(resp) -> Tuple[bool, Dict[str, List[str]]]:
+    d = _to_dict(resp)
+    used = False
+    queries: List[str] = []
+    urls: List[str] = []
+
+    def visit(node):
+        nonlocal used
+        if isinstance(node, dict):
+            t = str(node.get("type", "")).lower()
+            tool_name = str(node.get("tool_name", "")).lower()
+            if ("tool" in t and "web" in tool_name and "search" in tool_name) or \
+               ("web" in t and "search" in t):
+                used = True
+                args = node.get("args") or node.get("action") or {}
+                q = args.get("query") or args.get("search_query")
+                if isinstance(q, str) and q.strip():
+                    queries.append(q.strip())
+                for key in ("results", "sources", "citations"):
+                    items = node.get(key) or args.get(key) or []
+                    if isinstance(items, list):
+                        for it in items:
+                            if isinstance(it, dict):
+                                u = it.get("url") or it.get("link")
+                                if isinstance(u, str) and u.startswith(("http://", "https://")):
+                                    urls.append(u)
+            for v in node.values():
+                visit(v)
+        elif isinstance(node, list):
+            for v in node:
+                visit(v)
+
+    visit(d.get("output", d))
+    queries = list(dict.fromkeys([q for q in queries if q]))
+    urls = list(dict.fromkeys([u for u in urls if u]))
+    return used, {"queries": queries, "urls": urls}
+
+def _has_placeholder_teams(rows: List[Row]) -> bool:
+    def is_placeholder(n: str) -> bool:
+        return n.strip().lower() in {"heim", "gast", "home", "away"}
+    return any(is_placeholder(r.home_team) or is_placeholder(r.away_team) for r in rows)
+
+# -----------------------------------------------------------------------------
+# OpenAI core
+# -----------------------------------------------------------------------------
 def call_openai_predictions_strict(matchday_index: int,
                                    rows: List[Row],
                                    api_key: str,
@@ -578,7 +590,8 @@ def call_openai_predictions_strict(matchday_index: int,
                                    timeout_s: float,
                                    max_retries: int = 3,
                                    raw_dir: Optional[Path] = None,
-                                   prompt_profile: str = "research") -> List[Dict]:
+                                   prompt_profile: str = "research",
+                                   require_sources_in_responses: bool = True) -> List[Dict]:
     if not OpenAI:
         raise RuntimeError("OpenAI SDK nicht verfügbar.")
     if not api_key:
@@ -590,163 +603,17 @@ def call_openai_predictions_strict(matchday_index: int,
 
     n = len(rows)
 
-    hard_hints = [
-        "• Vermeide Serien gleicher Ergebnisse; 1:1 nur bei klarer Remis-Tendenz (Quoten/Analytics).",
-        "• P(H)+P(D)+P(A)=1±0.01; xG und O/U konsistent; Favoritensiege plausibel (2+ Tore, wenn Quoten stark).",
-        "• Quellen: 3–6 hochwertige Links mit Abrufzeit; falls unsicher: 'sources': [].",
-    ]
-
-    def _build_prompt(extra_hint: Optional[str] = None) -> str:
-        base = build_prompt_research(matchday_index, rows) if prompt_profile == "research" else build_prompt(matchday_index, rows)
-        if extra_hint:
-            return base + "\n" + extra_hint
-        return base
-
-    if prompt_profile == "research":
-        try:
-            from openai._base_client import make_request_options
-
-            prompt = _build_prompt(hard_hints[0])
-            log.info(
-                "OpenAI[responses] call: model=%s, md=%s, matches=%s, profile=%s (Websuche aktiv)",
-                model,
-                matchday_index,
-                n,
-                prompt_profile,
-            )
-            resp = client.responses.create(
-                model=model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
-                            "Nutze das Websuche-Tool für aktuelle Quoten und Quellen."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                tools=[{"type": "web_search"}],
-                tool_choice={"type": "web_search"},
-                temperature=temperature,
-                **make_request_options(timeout=timeout_s),
-            )
-
-            used, details = detect_web_search_usage(resp)
-            if used:
-                log.info("Websuche: JA | queries=%s | urls=%s", details["queries"][:3], details["urls"][:3])
-            else:
-                log.warning("Websuche: NEIN – Modell hat keine web_search-Calls ausgeführt.")
-
-
-            content_text = _responses_join_output_text(resp)
-            if raw_dir:
-                ensure_dir(raw_dir)
-                (raw_dir / f"md{matchday_index}_responses.json").write_text(content_text, encoding="utf-8")
-
-            data = _extract_json_object(content_text)
-            preds = data.get("predictions")
-            fixed = validate_predictions(preds, rows, matchday_index, forbid_degenerate=True)
-
-            for item in preds or []:
-                for s in (item.get("sources") or []):
-                    u = (s.get("url") or "").strip()
-                    if u and not re.match(r"^https?://", u):
-                        raise ValueError("Ungültige Quellen-URL erkannt.")
-            return fixed
-        except Exception as exc:
-            log.warning("Responses-Websuche fehlgeschlagen – nutze Chat-Fallback: %s", exc)
-
-    # --- JSON-Schema: Pflichtfelder inkl. Research-Feldern (dürfen explizit null/leer sein)
-
-    def nullable(schema: Dict) -> Dict:
-        """Markiert ein Schema als optional, ohne die Objektstruktur zu verändern."""
-        return {"oneOf": [deepcopy(schema), {"type": "null"}]}
-
-    def prob_field() -> Dict:
-        return {"type": "number", "minimum": 0, "maximum": 1}
-
-    probabilities_schema = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "home_win": prob_field(),
-            "draw": prob_field(),
-            "away_win": prob_field(),
-            "over_2_5": nullable(prob_field()),
-            "btts_yes": nullable(prob_field()),
-        },
-        "required": ["home_win", "draw", "away_win", "over_2_5", "btts_yes"],
-    }
-
-    scoreline_schema = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "score": {"type": "string"},
-            "p": prob_field(),
-        },
-        "required": ["score", "p"],
-    }
-
-    odds_schema = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "home": nullable({"type": "number"}),
-            "draw": nullable({"type": "number"}),
-            "away": nullable({"type": "number"}),
-        },
-        "required": ["home", "draw", "away"],
-    }
-
-    sources_schema = {
-        "type": "array",
-        "minItems": 0,
-        "maxItems": 8,
-        "items": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "url": {"type": "string"},
-            },
-            "patternProperties": {
-                "^(title|accessed|note)$": {"type": "string"},
-            },
-            "required": ["url"],
-        },
-    }
-
-    item_props = {
+    # Minimal strict schema for Chat (OpenAI requires additionalProperties=false under strict)
+    item_props_chat = {
         "row_index": {"type": "integer", "minimum": 1, "maximum": n},
         "matchday": {"type": "integer"},
         "home_team": {"type": "string"},
         "away_team": {"type": "string"},
-        "predicted_home_goals": {"type": "integer"},
-        "predicted_away_goals": {"type": "integer"},
+        "predicted_home_goals": {"type": "integer", "minimum": 0, "maximum": 9},
+        "predicted_away_goals": {"type": "integer", "minimum": 0, "maximum": 9},
         "reason": {"type": "string", "maxLength": 250},
-        "probabilities": nullable(probabilities_schema),
-        "top_scorelines": nullable({
-            "type": "array",
-            "items": scoreline_schema,
-            "minItems": 0,
-            "maxItems": 3,
-        }),
-        "odds_used": nullable(odds_schema),
-        "sources": nullable(sources_schema),
     }
-    
-    required_keys = [
-        "row_index",
-        "matchday",
-        "home_team",
-        "away_team",
-        "predicted_home_goals",
-        "predicted_away_goals",
-        "reason",
-    ]
-
-    schema = {
+    schema_chat = {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -756,43 +623,92 @@ def call_openai_predictions_strict(matchday_index: int,
                 "maxItems": n,
                 "items": {
                     "type": "object",
-                    "additionalProperties": False,
-                    "properties": item_props,
-                    "required": required_keys,
+                    "additionalProperties": False,  # <-- strict requires this to be false
+                    "properties": item_props_chat,
+                    "required": list(item_props_chat.keys()),
                 },
             }
         },
         "required": ["predictions"],
     }
 
-    hard_hints = [
-        "• Vermeide Serien gleicher Ergebnisse; 1:1 nur bei klarer Remis-Tendenz (Quoten/Analytics).",
-        "• P(H)+P(D)+P(A)=1±0.01; xG und O/U konsistent; Favoritensiege plausibel (2+ Tore, wenn Quoten stark).",
-        "• Quellen: 3–6 hochwertige Links mit Abrufzeit; falls unsicher: 'sources': [].",
-    ]
-
     def _build_prompt(extra_hint: Optional[str] = None) -> str:
-        if prompt_profile == "research":
-            base = build_prompt_research(matchday_index, rows)
-        else:
-            base = build_prompt(matchday_index, rows)
-        if extra_hint:
-            return base + "\n" + extra_hint
-        return base
+        base = build_prompt_research(matchday_index, rows)
+        return base + ("\n" + extra_hint if extra_hint else "")
 
-    # Try responses API first for research profile (with web search capability)
-    if prompt_profile == "research":
+    # Skip web_search if team names are placeholders
+    can_use_web = (prompt_profile == "research") and not _has_placeholder_teams(rows)
+
+    # ----- Responses API (with web_search) -----
+    if can_use_web:
+        attempts = min(2, max_retries)
+        for i in range(1, attempts + 1):
+            extra = ""
+            if i == 2 and require_sources_in_responses:
+                extra = "WICHTIG: Verwende echte Quellen-URLs (http/https) pro Spiel."
+            prompt = _build_prompt(extra)
+            log.info("OpenAI[responses] call: model=%s, md=%s, matches=%s, profile=%s (Websuche aktiv, try=%s)",
+                     model, matchday_index, n, prompt_profile, i)
+            try:
+                # NO response_format here (unsupported on Responses in this SDK)
+                resp = client.responses.create(
+                    model=model,
+                    input=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
+                                "Nutze das Websuche-Tool für Quoten/News und nenne Quellen."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    tools=[{"type": "web_search"}],
+                    temperature=temperature,
+                )
+
+                used, details = detect_web_search_usage(resp)
+                if used:
+                    log.info("Websuche: JA | queries=%s | urls=%s",
+                             details["queries"][:3], details["urls"][:3])
+                else:
+                    log.warning("Websuche: NEIN – keine Web-Tool-Events erkannt.")
+
+                content_text = _responses_join_output_text(resp)
+                if raw_dir:
+                    ensure_dir(raw_dir)
+                    (raw_dir / f"md{matchday_index}_responses_try{i}.json").write_text(content_text or "", encoding="utf-8")
+
+                data = _extract_json_object(content_text)
+                preds = data.get("predictions")
+                if not isinstance(preds, list) or len(preds) != n:
+                    raise ValueError(f"Erwarte genau {n} Items, erhalten: {len(preds) if isinstance(preds, list) else 'kein Array'}.")
+
+                fixed = validate_predictions(preds, rows, matchday_index, forbid_degenerate=True)
+                # quick sanity for any sources urls inside JSON (optional)
+                for item in preds or []:
+                    for s in (item.get("sources") or []):
+                        u = (s.get("url") or "").strip()
+                        if u and not re.match(r"^https?://", u):
+                            raise ValueError("Ungültige Quellen-URL erkannt.")
+                return fixed
+            except Exception as exc:
+                log.warning("Responses-Websuche fehlgeschlagen (try %s/%s): %s", i, attempts, exc)
+    else:
+        if prompt_profile == "research":
+            log.warning("Teamnamen Platzhalter ('Heim/Gast') erkannt — überspringe Websuche und nutze Chat-Fallback.")
+
+    # ----- Chat Completions fallback (NO tools) -----
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        extra_hint = ""
+        if attempt >= 2:
+            extra_hint = "Vermeide Serien gleicher Ergebnisse; 1:1 nur bei klarer Remis-Tendenz. Exakte Reihenfolge & row_index."
+        prompt = _build_prompt(extra_hint)
+
+        log.info("OpenAI[chat] call: model=%s, md=%s, matches=%s, try=%s, profile=%s",
+                 model, matchday_index, n, attempt, prompt_profile)
         try:
-            prompt = _build_prompt(hard_hints[0])
-            log.info(
-                "OpenAI[responses] call: model=%s, md=%s, matches=%s, profile=%s (Websuche aktiv)",
-                model,
-                matchday_index,
-                n,
-                prompt_profile,
-            )
-            # Note: This would require the responses API which may not be available
-            # Fallback to chat completions if responses API fails
             resp = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -800,83 +716,28 @@ def call_openai_predictions_strict(matchday_index: int,
                         "role": "system",
                         "content": (
                             "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
-                            "Nutze verfügbare Tools für aktuelle Quoten und Quellen."
+                            "Zeige KEINE Zwischenschritte, nur Ergebnisse."
                         ),
                     },
                     {"role": "user", "content": prompt},
                 ],
                 response_format={
                     "type": "json_schema",
-                    "json_schema": {"name": "bundesliga_predictions", "strict": True, "schema": schema},
+                    "json_schema": {"name": "bundesliga_predictions", "strict": True, "schema": schema_chat},
                 },
                 temperature=temperature,
             )
-
-            used, details = detect_web_search_usage(resp)
-            if used:
-                log.info("Websuche: JA | queries=%s | urls=%s", details["queries"][:3], details["urls"][:3])
-            else:
-                log.warning("Websuche: NEIN – Modell hat keine web_search-Calls ausgeführt.")
-
             content = resp.choices[0].message.content if resp.choices else None
             if raw_dir:
                 ensure_dir(raw_dir)
-                (raw_dir / f"md{matchday_index}_responses.json").write_text(content or "", encoding="utf-8")
+                (raw_dir / f"md{matchday_index}_chat_try{attempt}.json").write_text(content or "", encoding="utf-8")
 
-            if content:
-                data = json.loads(content)
-                preds = data.get("predictions")
-                fixed = validate_predictions(preds, rows, matchday_index, forbid_degenerate=True)
-
-                for item in preds or []:
-                    for s in (item.get("sources") or []):
-                        u = (s.get("url") or "").strip()
-                        if u and not re.match(r"^https?://", u):
-                            raise ValueError("Ungültige Quellen-URL erkannt.")
-                return fixed
-        except Exception as exc:
-            log.warning("Research-Modus fehlgeschlagen – nutze Chat-Fallback: %s", exc)
-
-    # Standard chat completions with retries
-
-    last_err = None
-    for attempt in range(1, max_retries + 1):
-        prompt = _build_prompt("\n".join(hard_hints[:attempt]))
-
-        log.info(f"OpenAI[chat] call: model={model}, md={matchday_index}, matches={n}, try={attempt}, profile={prompt_profile}")
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
-                        "Zeige KEINE Zwischenschritte, nur Ergebnisse."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": "bundesliga_predictions", "strict": True, "schema": schema},
-            },
-            temperature=temperature,
-        )
-
-        content = resp.choices[0].message.content if resp.choices else None
-        if raw_dir:
-            ensure_dir(raw_dir)
-            with (raw_dir / f"md{matchday_index}_try{attempt}.json").open("w", encoding="utf-8") as f:
-                f.write(content or "")
-
-        try:
             if not content:
                 raise ValueError("Leere Antwort.")
             data = json.loads(content)
             preds = data.get("predictions")
             fixed = validate_predictions(preds, rows, matchday_index, forbid_degenerate=True)
-
-            # weiche URL-Validierung, falls sources vorhanden
+            # optional URL sanity if model still emits 'sources'
             for item in preds or []:
                 for s in (item.get("sources") or []):
                     u = (s.get("url") or "").strip()
@@ -885,10 +746,9 @@ def call_openai_predictions_strict(matchday_index: int,
             return fixed
         except Exception as e:
             last_err = e
-            log.warning(f"Validierung fehlgeschlagen (try {attempt}/{max_retries}): {e}")
+            log.warning("Validierung fehlgeschlagen (chat try %s/%s): %s", attempt, max_retries, e)
 
     raise RuntimeError(f"OpenAI-Antwort unbrauchbar nach {max_retries} Versuchen: {last_err}")
-
 
 # -----------------------------------------------------------------------------
 # Submit & verify
@@ -920,7 +780,6 @@ def parse_form_fields(form: Tag) -> Dict[str, str]:
             continue
         data[name] = ta.text or ""
     return data
-
 
 def submit_with_dom(session: requests.Session,
                     pool_slug: str,
@@ -994,12 +853,11 @@ def submit_with_dom(session: requests.Session,
 
     return False, "Submit fehlgeschlagen."
 
-
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 def main():
-    ap = argparse.ArgumentParser(description="Kicktipp Auto-Predictor (STRICT, ohne 1:1-Fallback)")
+    ap = argparse.ArgumentParser(description="Kicktipp Auto-Predictor (STRICT, Websuche via Responses API)")
     ap.add_argument("--config", default="config.ini")
 
     ap.add_argument("--username", default=None)
@@ -1026,23 +884,26 @@ def main():
     cfg = load_config(args.config)
     ini_sections = ["DEFAULT", "auth", "kicktipp", "pool", "openai", "run", "settings"]
 
-    username = resolve_value(args.username, ["KICKTIPP_USERNAME", "KICKTIPP_USER"], ["username", "user", "kennung", "login", "email"], ini_sections, cfg, str, None)
-    password = resolve_value(args.password, ["KICKTIPP_PASSWORD", "KICKTIPP_PASS"], ["password", "passwort", "pwd"], ini_sections, cfg, str, None)
-    pool_slug = resolve_value(args.pool_slug, ["KICKTIPP_POOL_SLUG", "POOL_SLUG"], ["pool_slug", "pool", "runde", "group_slug", "competition"], ini_sections, cfg, str, None)
+    def resolve(key_cli, envs, inis, cast, default):
+        return resolve_value(getattr(args, key_cli), envs, inis, ini_sections, cfg, cast, default)
 
-    start_index = resolve_value(args.start_index, ["START_INDEX"], ["start_index", "from", "start"], ini_sections, cfg, int, 1)
-    end_index = resolve_value(args.end_index, ["END_INDEX"], ["end_index", "to", "end"], ini_sections, cfg, int, None)
+    username = resolve("username", ["KICKTIPP_USERNAME", "KICKTIPP_USER"], ["username", "user", "kennung", "login", "email"], str, None)
+    password = resolve("password", ["KICKTIPP_PASSWORD", "KICKTIPP_PASS"], ["password", "passwort", "pwd"], str, None)
+    pool_slug = resolve("pool_slug", ["KICKTIPP_POOL_SLUG", "POOL_SLUG"], ["pool_slug", "pool", "runde", "group_slug", "competition"], str, None)
 
-    openai_key = resolve_value(args.openai_key, ["OPENAI_API_KEY", "OPENAI_KEY"], ["api_key", "openai_api_key", "key", "token"], ini_sections, cfg, str, None)
-    model = resolve_value(args.model, ["OPENAI_MODEL"], ["model", "openai_model"], ini_sections, cfg, str, "gpt-4o-mini")
-    temperature = resolve_value(args.temperature, ["OPENAI_TEMPERATURE"], ["temperature", "temp"], ini_sections, cfg, float, 0.4)
-    oa_timeout = resolve_value(args.oa_timeout, ["OPENAI_TIMEOUT", "OA_TIMEOUT"], ["oa_timeout", "timeout", "openai_timeout"], ini_sections, cfg, float, 45.0)
-    max_retries = resolve_value(args.max_retries, ["OPENAI_MAX_RETRIES"], ["max_retries", "retries"], ini_sections, cfg, int, 3)
+    start_index = resolve("start_index", ["START_INDEX"], ["start_index", "from", "start"], int, 1)
+    end_index = resolve("end_index", ["END_INDEX"], ["end_index", "to", "end"], int, None)
+
+    openai_key = resolve("openai_key", ["OPENAI_API_KEY", "OPENAI_KEY"], ["api_key", "openai_api_key", "key", "token"], str, None)
+    model = resolve("model", ["OPENAI_MODEL"], ["model", "openai_model"], str, "gpt-4o")
+    temperature = resolve("temperature", ["OPENAI_TEMPERATURE"], ["temperature", "temp"], float, 0.8)
+    oa_timeout = resolve("oa_timeout", ["OPENAI_TIMEOUT", "OA_TIMEOUT"], ["oa_timeout", "timeout", "openai_timeout"], float, 120.0)
+    max_retries = resolve("max_retries", ["OPENAI_MAX_RETRIES"], ["max_retries", "retries"], int, 3)
     allow_heuristic = args.allow_heuristic_fallback or parse_bool(get_ini_value(cfg, ["allow_heuristic_fallback"], ini_sections), False)
-    prompt_profile = resolve_value(args.prompt_profile, ["OPENAI_PROMPT_PROFILE"], ["promptprofile", "prompt_profile"], ini_sections, cfg, str, "research")
+    prompt_profile = resolve("prompt_profile", ["OPENAI_PROMPT_PROFILE"], ["promptprofile", "prompt_profile"], str, "research")
 
     no_submit = args.no_submit or parse_bool(get_ini_value(cfg, ["no_submit"], ini_sections), False)
-    proxy = resolve_value(args.proxy, ["HTTPS_PROXY", "HTTP_PROXY"], ["proxy", "https_proxy", "http_proxy"], ini_sections, cfg, str, None)
+    proxy = resolve("proxy", ["HTTPS_PROXY", "HTTP_PROXY"], ["proxy", "https_proxy", "http_proxy"], str, None)
 
     if not username or not password or not pool_slug:
         print("Fehler: username/password/pool_slug fehlen (config.ini/ENV/CLI).", file=sys.stderr)
@@ -1065,8 +926,8 @@ def main():
     session = new_session(proxy=proxy)
     login(session, username, password)
 
-    # Initial page to detect tippsaison & range
-    html0, url0 = fetch_tippabgabe(session, pool_slug, spieltag_index=int(start_index or 1), tippsaison_id=None)
+    # First page: detect tippsaison & range
+    html0, _ = fetch_tippabgabe(session, pool_slug, spieltag_index=int(start_index or 1), tippsaison_id=None)
     soup0 = BeautifulSoup(html0, "html.parser")
     tippsaison_id = None
     hid = soup0.select_one('input[name="tippsaisonId"]')
@@ -1120,7 +981,7 @@ def main():
         write_json(forms_dir / f"{tippsaison_id}_md{idx}.json", forms_out)
         log.info(f"[Forms] Spieltag {idx}: {len(rows)} Spiele gespeichert.")
 
-        # --- Strict OpenAI predictions (no fallback 1:1)
+        # --- Predictions
         try:
             preds = call_openai_predictions_strict(
                 matchday_index=idx,
@@ -1132,21 +993,21 @@ def main():
                 max_retries=int(max_retries),
                 raw_dir=raw_dir,
                 prompt_profile=prompt_profile,
+                require_sources_in_responses=True,
             )
         except Exception as e:
             if allow_heuristic:
-                # letzte Notbremse: grobe Schätzung aus Quoten (nie 1:1 als Default)
                 log.error(f"OpenAI fehlgeschlagen, nutze HEURISTIK (aktiviert): {e}")
                 preds = []
                 for r in rows:
-                    # einfache Quoten-Logik, vermeidet 1:1
                     ho, do, ao = r.home_odds, r.draw_odds, r.away_odds
+                    # Simple odds-aware heuristic (never mass 1:1)
                     if ho and ao and ho < ao * 0.7:
                         hg, ag = 2, 0
                     elif ao and ho and ao < ho * 0.7:
                         hg, ag = 0, 2
                     elif do and ho and ao and do < min(ho, ao):
-                        hg, ag = 1, 1  # einziges erlaubtes Remis aus Heuristik
+                        hg, ag = 1, 1  # draw only when draw is the shortest price
                     else:
                         hg, ag = 2, 1
                     preds.append({
@@ -1174,7 +1035,6 @@ def main():
         "predictions_dir": str(preds_dir.resolve()),
         "raw_openai_dir": str(raw_dir.resolve()),
     }, ensure_ascii=False, indent=2))
-
 
 if __name__ == "__main__":
     main()
