@@ -500,7 +500,7 @@ def call_openai_predictions_strict(matchday_index: int,
 
     n = len(rows)
 
-    # --- JSON-Schema: Pflichtfelder + optionale Research-Felder
+    # --- JSON-Schema: Pflichtfelder + optionale Research-Felder (dürfen Null/leer sein)
     item_props = {
         "row_index": {"type": "integer", "minimum": 1, "maximum": n},
         "matchday": {"type": "integer"},
@@ -511,7 +511,7 @@ def call_openai_predictions_strict(matchday_index: int,
         "reason": {"type": "string", "maxLength": 250},
         # optional (research)
         "probabilities": {
-            "type": "object",
+            "type": ["object", "null"],
             "additionalProperties": False,
             "properties": {
                 "home_win": {"type": "number", "minimum": 0, "maximum": 1},
@@ -533,7 +533,7 @@ def call_openai_predictions_strict(matchday_index: int,
             "required": ["home_win", "draw", "away_win", "over_2_5", "btts_yes"],
         },
         "top_scorelines": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -546,7 +546,7 @@ def call_openai_predictions_strict(matchday_index: int,
             "minItems": 0, "maxItems": 3,
         },
         "odds_used": {
-            "type": "object",
+            "type": ["object", "null"],
             "additionalProperties": False,
             "properties": {
                 "home": {"type": ["number", "null"]},
@@ -556,7 +556,7 @@ def call_openai_predictions_strict(matchday_index: int,
             "required": ["home", "draw", "away"],
         },
         "sources": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -572,6 +572,8 @@ def call_openai_predictions_strict(matchday_index: int,
         },
     }
 
+    required_keys = list(item_props.keys())
+
     schema = {
         "type": "object",
         "additionalProperties": False,
@@ -584,10 +586,7 @@ def call_openai_predictions_strict(matchday_index: int,
                     "type": "object",
                     "additionalProperties": False,
                     "properties": item_props,
-                    "required": [
-                        "row_index", "matchday", "home_team", "away_team",
-                        "predicted_home_goals", "predicted_away_goals", "reason"
-                    ],
+                    "required": required_keys,
                 },
             }
         },
