@@ -17,7 +17,6 @@ Der Bot
 > - Die in `bot.py` verwendete Vorhersagefunktion **nutzt aktuell die Websuche/Tools**. Sie ruft das **Chat Completions API** mit einem **JSON‑Schema** auf.  
 > - Das Log zeigt den Text `OpenAI[responses] ... (Websuche aktiv)`, **faktisch** wird aber *Chat* verwendet (kein `tools=[{"type": "web_search"}]`).  
 > - Eine echte Websuche per **Responses API** ist in `openai_predictor.py` (Klasse `OpenAIPredictor`) vorbereitet; `bot.py` verwendet diese Klasse derzeit **nicht**. Unten steht, wie man Websuche optional aktiviert.
-> - Die Websuche funktioniert nicht mit allen Modellen. Gpt-4.1 hat die websuche aktiv, gpt-5 derzeit nicht. Bitte die OpenAI Dokumentation beachten.
 ---
 
 ## Features
@@ -120,7 +119,7 @@ python bot.py \
   --pool-slug "group-name" \
   --start-index 5 --end-index 5 \
   --openai-key "$OPENAI_API_KEY" \
-  --model "gpt-4.1" \
+  --model "gpt-5" \
   --temperature 0.4
 ```
 

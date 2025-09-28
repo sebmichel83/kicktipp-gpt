@@ -3,6 +3,7 @@
 
 """
 Kicktipp Predictor — STRICT mode (Responses API + optional Websuche)
++ Robust OpenAI rate‑limit handling (429/503) with exponential backoff & jitter
 
 This build fixes:
 - OpenAI Chat JSON schema 400s: item schema has additionalProperties=false (strict mode requirement)
@@ -10,9 +11,16 @@ This build fixes:
 - Much stronger team-name extraction around inputs (attributes, <label>, nearest <tr>, logos)
 - Responses API still without response_format (unsupported in your SDK)
 - Robust logging and raw dumps for auditability
+- NEW: Resilient rate limit handling for OpenAI (Responses + Chat) with configurable backoff
 
 Run:
   python3 bot.py --config config.ini
+
+Useful env/CLI overrides for rate limit handling:
+  --oa-rl-retries / OPENAI_RL_RETRIES (default 8)
+  --oa-rl-base    / OPENAI_RL_BASE    (default 0.8 seconds)
+  --oa-rl-cap     / OPENAI_RL_CAP     (default 30 seconds)
+  --oa-cooldown   / OPENAI_COOLDOWN   (sleep after each successful OpenAI call; default 0)
 """
 
 from __future__ import annotations
@@ -24,6 +32,8 @@ import logging
 import os
 import re
 import sys
+import time
+import random
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,9 +47,17 @@ from bs4 import BeautifulSoup, Tag
 try:
     import openai as openai_pkg
     from openai import OpenAI
+    try:
+        # Optional: error classes if available (OpenAI SDK >=1.0)
+        from openai import RateLimitError, APIError
+    except Exception:  # pragma: no cover
+        RateLimitError = Exception  # fallback
+        APIError = Exception
     OPENAI_VERSION = getattr(openai_pkg, "__version__", "unknown")
-except Exception:
+except Exception:  # pragma: no cover
     OpenAI = None
+    RateLimitError = Exception
+    APIError = Exception
     OPENAI_VERSION = None
 
 BASE_URL = "https://www.kicktipp.de"
@@ -448,7 +466,7 @@ def parse_rows_from_form(html: str) -> Tuple[List[Row], BeautifulSoup, Optional[
 # -----------------------------------------------------------------------------
 def build_prompt_research(matchday_index: int, rows: List[Row]) -> str:
     lines = []
-    lines.append("Du bist FootballPred LLM, ein sachlicher, quellengestützter Prognose-Assistent für Vereinsfußball.")
+    lines.append("Du bist FootballPred LHM, ein sachlicher, quellengestützter Prognose-Assistent für Vereinsfußball.")
     lines.append("Ziele: je Spiel ein konkretes Ergebnis (Heim-/Auswärtstore) auf Basis von Quoten (overround-bereinigt),")
     lines.append("xG-/Elo-/Formdaten, Verletzungen/Sperren, vorauss. Aufstellungen, Heimvorteil/Kontext.")
     lines.append("Nutze das Websuche-Tool aktiv und zitiere Quellen (URLs).")
@@ -580,6 +598,109 @@ def _has_placeholder_teams(rows: List[Row]) -> bool:
     return any(is_placeholder(r.home_team) or is_placeholder(r.away_team) for r in rows)
 
 # -----------------------------------------------------------------------------
+# OpenAI rate-limit handling utilities (NEW)
+# -----------------------------------------------------------------------------
+def _extract_retry_after_seconds(err: Exception) -> Optional[float]:
+    """Try to extract a sensible Retry-After in seconds from the exception."""
+    # 1) Headers (if available)
+    try:
+        resp = getattr(err, "response", None)
+        if resp is not None:
+            # httpx Response
+            headers = getattr(resp, "headers", {}) or {}
+            for k in ("retry-after", "Retry-After", "x-ratelimit-reset-requests", "x-ratelimit-reset-tokens"):
+                v = headers.get(k)
+                if v:
+                    v = str(v).strip()
+                    if v.isdigit():
+                        return float(v)
+                    # If it's a date we skip parsing; too much effort for small gain
+    except Exception:
+        pass
+
+    # 2) Message text like "Please try again in 644ms" / "in 1.2s"
+    msg = ""
+    try:
+        msg = str(getattr(err, "message", "")) or str(err)
+    except Exception:
+        msg = str(err)
+
+    m = re.search(r"in\s+(\d+(?:\.\d+)?)\s*ms", msg, re.I)
+    if m:
+        try:
+            return float(m.group(1)) / 1000.0
+        except Exception:
+            pass
+    m = re.search(r"in\s+(\d+(?:\.\d+)?)\s*s(ec|ecs|econds)?", msg, re.I)
+    if m:
+        try:
+            return float(m.group(1))
+        except Exception:
+            pass
+
+    # 3) Nothing reliable
+    return None
+
+def _is_rate_limit_or_throttle(err: Exception) -> bool:
+    """Detect 429/503 throttling situations from exception metadata or message."""
+    try:
+        status = getattr(err, "status_code", None)
+        if status in (429, 503):
+            return True
+    except Exception:
+        pass
+    s = str(err).lower()
+    return ("rate limit" in s) or ("429" in s) or ("rpm" in s and "limit" in s) or ("tpm" in s and "limit" in s) or ("server overloaded" in s)
+
+def _sleep_backoff(attempt: int, base: float, cap: float, hinted: Optional[float] = None) -> float:
+    """
+    Sleep with exponential backoff and jitter.
+    - attempt starts at 1
+    - hinted (Retry-After) takes precedence if larger than computed base
+    """
+    backoff = base * (2 ** (attempt - 1))
+    if hinted is not None:
+        backoff = max(backoff, hinted)
+    backoff = min(backoff, cap)
+    # Full jitter (0..backoff)
+    delay = random.uniform(0, backoff)
+    delay = max(0.05, delay)  # never 0
+    time.sleep(delay)
+    return delay
+
+def _call_with_rate_limit(call_fn, desc: str,
+                          rl_max_retries: int,
+                          rl_base: float,
+                          rl_cap: float):
+    """
+    Call an OpenAI SDK function with robust rate-limit handling.
+    - Retries only for 429/503 and similar throttling hints.
+    - Re-raises other exceptions immediately.
+    """
+    attempt = 1
+    while True:
+        try:
+            return call_fn()
+        except Exception as e:
+            if _is_rate_limit_or_throttle(e) and attempt <= rl_max_retries:
+                ra = _extract_retry_after_seconds(e)
+                slept = _sleep_backoff(attempt=attempt, base=rl_base, cap=rl_cap, hinted=ra)
+                log.warning(f"[OpenAI RL] {desc}: Rate limit/throttle (try {attempt}/{rl_max_retries}). Schlafe {slept:.2f}s. Fehler: {e}")
+                attempt += 1
+                continue
+            # Any other error, or retries exhausted
+            raise
+
+def _maybe_cooldown(cooldown_s: float) -> None:
+    """Optional cooldown after a successful OpenAI call to reduce RPM pressure."""
+    try:
+        cs = float(cooldown_s or 0)
+    except Exception:
+        cs = 0.0
+    if cs > 0:
+        time.sleep(cs)
+
+# -----------------------------------------------------------------------------
 # OpenAI core
 # -----------------------------------------------------------------------------
 def call_openai_predictions_strict(matchday_index: int,
@@ -591,7 +712,12 @@ def call_openai_predictions_strict(matchday_index: int,
                                    max_retries: int = 3,
                                    raw_dir: Optional[Path] = None,
                                    prompt_profile: str = "research",
-                                   require_sources_in_responses: bool = True) -> List[Dict]:
+                                   require_sources_in_responses: bool = True,
+                                   # NEW: rate-limit control
+                                   rl_max_retries: int = 8,
+                                   rl_base: float = 0.8,
+                                   rl_cap: float = 30.0,
+                                   cooldown_s: float = 0.0) -> List[Dict]:
     if not OpenAI:
         raise RuntimeError("OpenAI SDK nicht verfügbar.")
     if not api_key:
@@ -650,22 +776,29 @@ def call_openai_predictions_strict(matchday_index: int,
             log.info("OpenAI[responses] call: model=%s, md=%s, matches=%s, profile=%s (Websuche aktiv, try=%s)",
                      model, matchday_index, n, prompt_profile, i)
             try:
-                # NO response_format here (unsupported on Responses in this SDK)
-                resp = client.responses.create(
-                    model=model,
-                    input=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
-                                "Nutze das Websuche-Tool für Quoten/News und nenne Quellen."
-                            ),
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    tools=[{"type": "web_search"}],
-                    temperature=temperature,
+                # Wrap the SDK call with rate-limit handling
+                resp = _call_with_rate_limit(
+                    lambda: client.responses.create(
+                        model=model,
+                        input=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
+                                    "Nutze das Websuche-Tool für Quoten/News und nenne Quellen."
+                                ),
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        tools=[{"type": "web_search"}],
+                        temperature=temperature,
+                    ),
+                    desc=f"responses md={matchday_index} try={i}",
+                    rl_max_retries=rl_max_retries,
+                    rl_base=rl_base,
+                    rl_cap=rl_cap,
                 )
+                _maybe_cooldown(cooldown_s)
 
                 used, details = detect_web_search_usage(resp)
                 if used:
@@ -709,24 +842,32 @@ def call_openai_predictions_strict(matchday_index: int,
         log.info("OpenAI[chat] call: model=%s, md=%s, matches=%s, try=%s, profile=%s",
                  model, matchday_index, n, attempt, prompt_profile)
         try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
-                            "Zeige KEINE Zwischenschritte, nur Ergebnisse."
-                        ),
+            resp = _call_with_rate_limit(
+                lambda: client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
+                                "Zeige KEINE Zwischenschritte, nur Ergebnisse."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {"name": "bundesliga_predictions", "strict": True, "schema": schema_chat},
                     },
-                    {"role": "user", "content": prompt},
-                ],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {"name": "bundesliga_predictions", "strict": True, "schema": schema_chat},
-                },
-                temperature=temperature,
+                    temperature=temperature,
+                ),
+                desc=f"chat md={matchday_index} try={attempt}",
+                rl_max_retries=rl_max_retries,
+                rl_base=rl_base,
+                rl_cap=rl_cap,
             )
+            _maybe_cooldown(cooldown_s)
+
             content = resp.choices[0].message.content if resp.choices else None
             if raw_dir:
                 ensure_dir(raw_dir)
@@ -879,6 +1020,12 @@ def main():
     ap.add_argument("--no-submit", action="store_true")
     ap.add_argument("--proxy", default=None)
 
+    # NEW: CLI knobs for rate-limit handling
+    ap.add_argument("--oa-rl-retries", type=int, default=None, help="Max retries on OpenAI rate limits (429/503). Default 8")
+    ap.add_argument("--oa-rl-base", type=float, default=None, help="Base backoff seconds for OpenAI rate limits. Default 0.8s")
+    ap.add_argument("--oa-rl-cap", type=float, default=None, help="Max backoff seconds for OpenAI rate limits. Default 30s")
+    ap.add_argument("--oa-cooldown", type=float, default=None, help="Cooldown seconds after each successful OpenAI call. Default 0s")
+
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -902,6 +1049,24 @@ def main():
     allow_heuristic = args.allow_heuristic_fallback or parse_bool(get_ini_value(cfg, ["allow_heuristic_fallback"], ini_sections), False)
     prompt_profile = resolve("prompt_profile", ["OPENAI_PROMPT_PROFILE"], ["promptprofile", "prompt_profile"], str, "research")
 
+    # NEW: rate-limit knobs
+    rl_retries = resolve("oa_rl_retries",
+                         ["OPENAI_RL_RETRIES", "OPENAI_RATE_LIMIT_RETRIES"],
+                         ["oa_rl_retries", "rl_retries", "rate_limit_retries"],
+                         int, 8)
+    rl_base = resolve("oa_rl_base",
+                      ["OPENAI_RL_BASE", "OPENAI_RATE_LIMIT_BASE"],
+                      ["oa_rl_base", "rl_base", "rate_limit_base"],
+                      float, 0.8)
+    rl_cap = resolve("oa_rl_cap",
+                     ["OPENAI_RL_CAP", "OPENAI_RATE_LIMIT_CAP"],
+                     ["oa_rl_cap", "rl_cap", "rate_limit_cap"],
+                     float, 30.0)
+    oa_cooldown = resolve("oa_cooldown",
+                          ["OPENAI_COOLDOWN", "OPENAI_CALL_COOLDOWN"],
+                          ["oa_cooldown", "cooldown"],
+                          float, 0.0)
+
     no_submit = args.no_submit or parse_bool(get_ini_value(cfg, ["no_submit"], ini_sections), False)
     proxy = resolve("proxy", ["HTTPS_PROXY", "HTTP_PROXY"], ["proxy", "https_proxy", "http_proxy"], str, None)
 
@@ -920,7 +1085,8 @@ def main():
         f"pool={pool_slug} | start={start_index} | end={end_index or 'auto'} | "
         f"model={model} | temp={temperature} | retries={max_retries} | "
         f"heuristic={'on' if allow_heuristic else 'off'} | submit={'off' if no_submit else 'on'} | "
-        f"timeout={oa_timeout}s | user={username} | key={mask_secret(openai_key)}"
+        f"timeout={oa_timeout}s | user={username} | key={mask_secret(openai_key)} | "
+        f"rl(retries={rl_retries}, base={rl_base}s, cap={rl_cap}s) | cooldown={oa_cooldown}s"
     )
 
     session = new_session(proxy=proxy)
@@ -994,6 +1160,10 @@ def main():
                 raw_dir=raw_dir,
                 prompt_profile=prompt_profile,
                 require_sources_in_responses=True,
+                rl_max_retries=int(rl_retries),
+                rl_base=float(rl_base),
+                rl_cap=float(rl_cap),
+                cooldown_s=float(oa_cooldown),
             )
         except Exception as e:
             if allow_heuristic:
