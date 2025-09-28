@@ -38,6 +38,7 @@ flowchart LR
   S -->|POST| TForm
   S <--|GET verify| TForm
   O -->|loop 1..34| TK
+
 ```
 
 ### Agents (Conceptual Roles)
