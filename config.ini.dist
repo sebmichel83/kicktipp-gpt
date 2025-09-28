@@ -8,7 +8,7 @@ tippsaison_id = 4000000
 
 [openai]
 api_key = sk-proj-... 
-model = gpt-5
+model = gpt-5-mini
 temperature = 1
 timeout = 1200
 prompt_profile = research
