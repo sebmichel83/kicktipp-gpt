@@ -567,15 +567,66 @@ def call_openai_predictions_strict(matchday_index: int,
         "predicted_away_goals": {"type": "integer"},
         "reason": {"type": "string", "maxLength": 250},
         # optional (research)
-        "probabilities": nullable(probabilities_schema),
-        "top_scorelines": nullable({
+        "probabilities": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "home_win": {"type": "number", "minimum": 0, "maximum": 1},
+                "draw": {"type": "number", "minimum": 0, "maximum": 1},
+                "away_win": {"type": "number", "minimum": 0, "maximum": 1},
+                "over_2_5": {
+                    "anyOf": [
+                        {"type": "number", "minimum": 0, "maximum": 1},
+                        {"type": "null"},
+                    ]
+                },
+                "btts_yes": {
+                    "anyOf": [
+                        {"type": "number", "minimum": 0, "maximum": 1},
+                        {"type": "null"},
+                    ]
+                },
+            },
+            "required": ["home_win", "draw", "away_win", "over_2_5", "btts_yes"],
+        },
+        "top_scorelines": {
             "type": "array",
-            "items": scoreline_schema,
-            "minItems": 0,
-            "maxItems": 3,
-        }),
-        "odds_used": nullable(odds_schema),
-        "sources": nullable(sources_schema),
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "score": {"type": "string"},
+                    "p": {"type": "number", "minimum": 0, "maximum": 1},
+                },
+                "required": ["score", "p"],
+            },
+            "minItems": 0, "maxItems": 3,
+        },
+        "odds_used": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "home": {"type": ["number", "null"]},
+                "draw": {"type": ["number", "null"]},
+                "away": {"type": ["number", "null"]},
+            },
+            "required": ["home", "draw", "away"],
+        },
+        "sources": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "title": {"type": "string"},
+                    "url": {"type": "string"},
+                    "accessed": {"type": "string"},
+                    "note": {"type": "string"},
+                },
+                "required": ["url"],
+            },
+            "minItems": 0, "maxItems": 8,
+        },
     }
 
     optional_keys = {"probabilities", "top_scorelines", "odds_used", "sources"}
