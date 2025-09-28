@@ -64,7 +64,7 @@ username = dein.loginname
 password = dein.passwort
 
 [pool]
-pool_slug = jhb-grosse-jungs
+pool_slug = group-name
 
 [openai]
 api_key = sk-...
@@ -100,7 +100,7 @@ proxy = http://127.0.0.1:8080
 python bot.py \
   --username "$KICKTIPP_USERNAME" \
   --password "$KICKTIPP_PASSWORD" \
-  --pool-slug "jhb-grosse-jungs" \
+  --pool-slug "group-name" \
   --start-index 5 --end-index 5 \
   --openai-key "$OPENAI_API_KEY" \
   --model "gpt-4o-mini" \
