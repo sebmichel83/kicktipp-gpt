@@ -500,7 +500,7 @@ def call_openai_predictions_strict(matchday_index: int,
 
     n = len(rows)
 
-    # --- JSON-Schema: Pflichtfelder + optionale Research-Felder
+    # --- JSON-Schema: Pflichtfelder + optionale Research-Felder (dürfen fehlen oder Null sein)
     item_props = {
         "row_index": {"type": "integer", "minimum": 1, "maximum": n},
         "matchday": {"type": "integer"},
@@ -509,55 +509,8 @@ def call_openai_predictions_strict(matchday_index: int,
         "predicted_home_goals": {"type": "integer"},
         "predicted_away_goals": {"type": "integer"},
         "reason": {"type": "string", "maxLength": 250},
-        # optional (research)
-        "probabilities": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "home_win": {"type": "number", "minimum": 0, "maximum": 1},
-                "draw": {"type": "number", "minimum": 0, "maximum": 1},
-                "away_win": {"type": "number", "minimum": 0, "maximum": 1},
-                "over_2_5": {"type": "number", "minimum": 0, "maximum": 1},
-                "btts_yes": {"type": "number", "minimum": 0, "maximum": 1},
-            },
-        },
-        "top_scorelines": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "score": {"type": "string"},
-                    "p": {"type": "number", "minimum": 0, "maximum": 1},
-                },
-                "required": ["score", "p"],
-            },
-            "minItems": 0, "maxItems": 3,
-        },
-        "odds_used": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "home": {"type": ["number", "null"]},
-                "draw": {"type": ["number", "null"]},
-                "away": {"type": ["number", "null"]},
-            },
-        },
-        "sources": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": True,
-                "properties": {
-                    "title": {"type": "string"},
-                    "url": {"type": "string"},
-                    "accessed": {"type": "string"},
-                },
-                "required": ["url"],
-            },
-            "minItems": 0, "maxItems": 8,
-        },
     }
+    required_keys = list(item_props.keys())
 
     schema = {
         "type": "object",
@@ -569,12 +522,9 @@ def call_openai_predictions_strict(matchday_index: int,
                 "maxItems": n,
                 "items": {
                     "type": "object",
-                    "additionalProperties": False,
+                    "additionalProperties": True,
                     "properties": item_props,
-                    "required": [
-                        "row_index", "matchday", "home_team", "away_team",
-                        "predicted_home_goals", "predicted_away_goals", "reason"
-                    ],
+                    "required": required_keys,
                 },
             }
         },
@@ -590,7 +540,7 @@ def call_openai_predictions_strict(matchday_index: int,
     def _build_prompt():
         if prompt_profile == "research":
             return build_prompt_research(matchday_index, rows)
-        return build_prompt_minimal(matchday_index, rows)
+        return build_prompt(matchday_index, rows)
 
     last_err = None
     for attempt in range(1, max_retries + 1):
@@ -768,6 +718,7 @@ def main():
     ap.add_argument("--oa-timeout", type=float, default=None)
 
     ap.add_argument("--max-retries", type=int, default=None)
+    ap.add_argument("--prompt-profile", default=None)
     ap.add_argument("--allow-heuristic-fallback", action="store_true",
                     help="Nur für Notfälle. Wenn gesetzt, wird NIE 1:1 genommen; aber heuristisch aus Quoten geschätzt.")
     ap.add_argument("--no-submit", action="store_true")
@@ -791,7 +742,7 @@ def main():
     oa_timeout = resolve_value(args.oa_timeout, ["OPENAI_TIMEOUT", "OA_TIMEOUT"], ["oa_timeout", "timeout", "openai_timeout"], ini_sections, cfg, float, 45.0)
     max_retries = resolve_value(args.max_retries, ["OPENAI_MAX_RETRIES"], ["max_retries", "retries"], ini_sections, cfg, int, 3)
     allow_heuristic = args.allow_heuristic_fallback or parse_bool(get_ini_value(cfg, ["allow_heuristic_fallback"], ini_sections), False)
-    prompt_profile = resolve_value(args.model, ["OPENAI_PROMPT_PROFILE"], ["promptprofile", "prompt_profile"], ini_sections, cfg, str, "research")
+    prompt_profile = resolve_value(args.prompt_profile, ["OPENAI_PROMPT_PROFILE"], ["promptprofile", "prompt_profile"], ini_sections, cfg, str, "research")
 
     no_submit = args.no_submit or parse_bool(get_ini_value(cfg, ["no_submit"], ini_sections), False)
     proxy = resolve_value(args.proxy, ["HTTPS_PROXY", "HTTP_PROXY"], ["proxy", "https_proxy", "http_proxy"], ini_sections, cfg, str, None)
