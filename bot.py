@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import sys
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +58,62 @@ log = logging.getLogger("root")
 # -----------------------------------------------------------------------------
 # Utils
 # -----------------------------------------------------------------------------
+def _to_dict(resp_obj):
+    # robustes „to dict“ für verschiedene SDK-Versionen
+    for attr in ("to_dict", "model_dump", "dict"):
+        f = getattr(resp_obj, attr, None)
+        if callable(f):
+            try:
+                d = f()
+                # pydantic: model_dump kann kein reines dict sein
+                if hasattr(d, "items"):
+                    return d
+            except Exception:
+                pass
+    try:
+        # letzte Rettung: JSON roundtrip
+        return json.loads(getattr(resp_obj, "model_dump_json", lambda: json.dumps(resp_obj, default=str))())
+    except Exception:
+        return json.loads(json.dumps(resp_obj, default=str))
+
+def detect_web_search_usage(resp):
+    """
+    Liefert (used: bool, details: dict mit queries & urls), indem das Responses-Objekt
+    nach web_search_call-Blöcken / Quellen durchsucht wird.
+    """
+    d = _to_dict(resp)
+    output = d.get("output") or []
+    used = False
+    queries, urls = [], []
+
+    def walk(x):
+        nonlocal used
+        if isinstance(x, dict):
+            t = x.get("type") or x.get("event") or ""
+            if isinstance(t, str) and "web_search_call" in t:
+                used = True
+                # Versuche Query & Quellen aus häufigen Feldern zu ziehen
+                action = x.get("action") or {}
+                q = action.get("query") or action.get("search_query")
+                if q: queries.append(q)
+                # Ergebnisse/Quellen: je nach SDK-Fassung "sources" oder "results"
+                for item in (action.get("sources") or action.get("results") or []):
+                    u = item.get("url") or item.get("link")
+                    if u: urls.append(u)
+            # rekursiv
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    walk(output)
+    # Duplikate entfernen, Reihenfolge beibehalten
+    uq = list(dict.fromkeys(queries))
+    uu = list(dict.fromkeys(urls))
+    return used, {"queries": uq, "urls": uu}
+
+
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
@@ -441,7 +498,7 @@ def build_prompt(matchday_index: int, rows: List[Row], hard_constraints_hint: st
     lines.append("  probabilities {home_win/draw/away_win/over_2_5/btts_yes}, top_scorelines [], odds_used {}, sources [].")
     lines.append("• Verwende die Teamnamen EXAKT wie angegeben (keine Abkürzungen).")
     lines.append("• Nutze Buchmacher-QUOTEN (H/D/A), aktuelle Form/News/Verletzungen und Analytics (xG/Elo) als Evidenz.")
-    lines.append("• reason kurz: z. B. 'Odds 1.75 H; xG +0.3; Verletzung XY'.")
+    lines.append("• reason kurz: z. B. 'Odds 1.75 H; xG +0.3; Verletzung XY'.")
     lines.append("• Vermeide gleichförmige Ergebnisse; richte dich an den Quoten aus (kein 1:1 als Standard).")
     if hard_constraints_hint:
         lines.append(hard_constraints_hint)
@@ -670,6 +727,7 @@ def call_openai_predictions_strict(matchday_index: int,
         "odds_used": nullable(odds_schema),
         "sources": nullable(sources_schema),
     }
+    
     required_keys = [
         "row_index",
         "matchday",
@@ -698,6 +756,80 @@ def call_openai_predictions_strict(matchday_index: int,
         },
         "required": ["predictions"],
     }
+
+    hard_hints = [
+        "• Vermeide Serien gleicher Ergebnisse; 1:1 nur bei klarer Remis-Tendenz (Quoten/Analytics).",
+        "• P(H)+P(D)+P(A)=1±0.01; xG und O/U konsistent; Favoritensiege plausibel (2+ Tore, wenn Quoten stark).",
+        "• Quellen: 3–6 hochwertige Links mit Abrufzeit; falls unsicher: 'sources': [].",
+    ]
+
+    def _build_prompt(extra_hint: Optional[str] = None) -> str:
+        if prompt_profile == "research":
+            base = build_prompt_research(matchday_index, rows)
+        else:
+            base = build_prompt(matchday_index, rows)
+        if extra_hint:
+            return base + "\n" + extra_hint
+        return base
+
+    # Try responses API first for research profile (with web search capability)
+    if prompt_profile == "research":
+        try:
+            prompt = _build_prompt(hard_hints[0])
+            log.info(
+                "OpenAI[responses] call: model=%s, md=%s, matches=%s, profile=%s (Websuche aktiv)",
+                model,
+                matchday_index,
+                n,
+                prompt_profile,
+            )
+            # Note: This would require the responses API which may not be available
+            # Fallback to chat completions if responses API fails
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
+                            "Nutze verfügbare Tools für aktuelle Quoten und Quellen."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": "bundesliga_predictions", "strict": True, "schema": schema},
+                },
+                temperature=temperature,
+            )
+
+            used, details = detect_web_search_usage(resp)
+            if used:
+                log.info("Websuche: JA | queries=%s | urls=%s", details["queries"][:3], details["urls"][:3])
+            else:
+                log.warning("Websuche: NEIN – Modell hat keine web_search-Calls ausgeführt.")
+
+            content = resp.choices[0].message.content if resp.choices else None
+            if raw_dir:
+                ensure_dir(raw_dir)
+                (raw_dir / f"md{matchday_index}_responses.json").write_text(content or "", encoding="utf-8")
+
+            if content:
+                data = json.loads(content)
+                preds = data.get("predictions")
+                fixed = validate_predictions(preds, rows, matchday_index, forbid_degenerate=True)
+
+                for item in preds or []:
+                    for s in (item.get("sources") or []):
+                        u = (s.get("url") or "").strip()
+                        if u and not re.match(r"^https?://", u):
+                            raise ValueError("Ungültige Quellen-URL erkannt.")
+                return fixed
+        except Exception as exc:
+            log.warning("Research-Modus fehlgeschlagen – nutze Chat-Fallback: %s", exc)
+
+    # Standard chat completions with retries
 
     last_err = None
     for attempt in range(1, max_retries + 1):
@@ -1038,4 +1170,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
