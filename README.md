@@ -15,8 +15,6 @@ Der Bot
 
 > **Wichtig:**  
 > - Die in `bot.py` verwendete Vorhersagefunktion **nutzt aktuell die Websuche/Tools**. Sie ruft das **Chat Completions API** mit einem **JSON‑Schema** auf.  
-> - Das Log zeigt den Text `OpenAI[responses] ... (Websuche aktiv)`, **faktisch** wird aber *Chat* verwendet (kein `tools=[{"type": "web_search"}]`).  
-> - Eine echte Websuche per **Responses API** ist in `openai_predictor.py` (Klasse `OpenAIPredictor`) vorbereitet; `bot.py` verwendet diese Klasse derzeit **nicht**. Unten steht, wie man Websuche optional aktiviert.
 ---
 
 ## Features
