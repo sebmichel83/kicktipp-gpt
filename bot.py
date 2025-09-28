@@ -559,9 +559,12 @@ def call_openai_predictions_strict(matchday_index: int,
             "type": "array",
             "items": {
                 "type": "object",
-                "additionalProperties": True,
+                "additionalProperties": False,
                 "properties": {
+                    "title": {"type": "string"},
                     "url": {"type": "string"},
+                    "accessed": {"type": "string"},
+                    "note": {"type": "string"},
                 },
                 "required": ["url"],
             },
