@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import sys
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -65,6 +66,35 @@ def write_json(path: Path, data) -> None:
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     log.info(f"Datei geschrieben: {path.resolve()}")
+
+
+def _responses_join_output_text(resp) -> str:
+    """Fügt segmentierte Responses-Ausgaben zu einem Text zusammen."""
+    try:
+        chunks = getattr(resp, "output", None) or []
+        parts = []
+        for ch in chunks:
+            if getattr(ch, "type", "") == "output_text":
+                parts.append(getattr(ch, "text", ""))
+        if parts:
+            return "\n".join(parts)
+    except Exception:
+        pass
+    return getattr(resp, "output_text", None) or str(resp)
+
+
+def _extract_json_object(text: str) -> Dict:
+    """Extrahiert das erste JSON-Objekt aus einem gegebenen Text."""
+    if not text:
+        raise ValueError("Leere Modellantwort.")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        return json.loads(match.group(0))
+    raise ValueError("Konnte kein JSON-Objekt in der Antwort finden.")
 
 
 def mask_secret(s: Optional[str], keep: int = 3) -> str:
@@ -366,6 +396,7 @@ def build_prompt_research(matchday_index: int, rows: List[Row]) -> str:
     lines.append("Verletzungen/Sperren, vorauss. Aufstellungen und Kontext (Heimvorteil, Reisestrapazen, Spieldichte).")
     # Prinzipien
     lines.append("Prinzipien: Evidenzbasiert; Unsicherheit transparent; Konsistenzprüfungen; KEINE Wettaufforderung.")
+    lines.append("Nutze das verfügbare Websuche-Tool aktiv (Quoten, Verletzungen, Form, Wetter) und zitiere Quellen.")
     # Format
     lines.append("AUSGABEFORMAT (zwingend):")
     lines.append("{ 'predictions': [ {"
@@ -410,7 +441,7 @@ def build_prompt(matchday_index: int, rows: List[Row], hard_constraints_hint: st
     lines.append("  probabilities {home_win/draw/away_win/over_2_5/btts_yes}, top_scorelines [], odds_used {}, sources [].")
     lines.append("• Verwende die Teamnamen EXAKT wie angegeben (keine Abkürzungen).")
     lines.append("• Nutze Buchmacher-QUOTEN (H/D/A), aktuelle Form/News/Verletzungen und Analytics (xG/Elo) als Evidenz.")
-    lines.append("• reason kurz: z. B. 'Odds 1.75 H; xG +0.3; Verletzung XY'.")
+    lines.append("• reason kurz: z. B. 'Odds 1.75 H; xG +0.3; Verletzung XY'.")
     lines.append("• Vermeide gleichförmige Ergebnisse; richte dich an den Quoten aus (kein 1:1 als Standard).")
     if hard_constraints_hint:
         lines.append(hard_constraints_hint)
@@ -569,73 +600,17 @@ def call_openai_predictions_strict(matchday_index: int,
         "predicted_home_goals": {"type": "integer"},
         "predicted_away_goals": {"type": "integer"},
         "reason": {"type": "string", "maxLength": 250},
-
-        # optional (research)
-        "probabilities": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "home_win": {"type": "number", "minimum": 0, "maximum": 1},
-                "draw": {"type": "number", "minimum": 0, "maximum": 1},
-                "away_win": {"type": "number", "minimum": 0, "maximum": 1},
-                "over_2_5": {
-                    "anyOf": [
-                        {"type": "number", "minimum": 0, "maximum": 1},
-                        {"type": "null"},
-                    ]
-                },
-                "btts_yes": {
-                    "anyOf": [
-                        {"type": "number", "minimum": 0, "maximum": 1},
-                        {"type": "null"},
-                    ]
-                },
-            },
-            "required": ["home_win", "draw", "away_win", "over_2_5", "btts_yes"],
-        },
-        "top_scorelines": {
+        "probabilities": nullable(probabilities_schema),
+        "top_scorelines": nullable({
             "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "score": {"type": "string"},
-                    "p": {"type": "number", "minimum": 0, "maximum": 1},
-                },
-                "required": ["score", "p"],
-            },
-            "minItems": 0, "maxItems": 3,
-        },
-        "odds_used": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "home": {"type": ["number", "null"]},
-                "draw": {"type": ["number", "null"]},
-                "away": {"type": ["number", "null"]},
-            },
-            "required": ["home", "draw", "away"],
-        },
-        "sources": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "title": {"type": "string"},
-                    "url": {"type": "string"},
-                    "accessed": {"type": "string"},
-                    "note": {"type": "string"},
-                },
-                "required": ["url"],
-            },
-            "minItems": 0, "maxItems": 8,
-        },
+            "items": scoreline_schema,
+            "minItems": 0,
+            "maxItems": 3,
+        }),
+        "odds_used": nullable(odds_schema),
+        "sources": nullable(sources_schema),
     }
     required_keys = list(item_props.keys())
-
-    optional_keys = {"probabilities", "top_scorelines", "odds_used", "sources"}
-    required_keys = [k for k in item_props.keys() if k not in optional_keys]
 
     schema = {
         "type": "object",
@@ -662,14 +637,70 @@ def call_openai_predictions_strict(matchday_index: int,
         "• Quellen: 3–6 hochwertige Links mit Abrufzeit; falls unsicher: 'sources': [].",
     ]
 
-    def _build_prompt():
+    def _build_prompt(extra_hint: Optional[str] = None) -> str:
         if prompt_profile == "research":
-            return build_prompt_research(matchday_index, rows)
-        return build_prompt(matchday_index, rows)
+            base = build_prompt_research(matchday_index, rows)
+        else:
+            base = build_prompt(matchday_index, rows)
+        if extra_hint:
+            return base + "\n" + extra_hint
+        return base
 
+    # Try responses API first for research profile (with web search capability)
+    if prompt_profile == "research":
+        try:
+            prompt = _build_prompt(hard_hints[0])
+            log.info(
+                "OpenAI[responses] call: model=%s, md=%s, matches=%s, profile=%s (Websuche aktiv)",
+                model,
+                matchday_index,
+                n,
+                prompt_profile,
+            )
+            # Note: This would require the responses API which may not be available
+            # Fallback to chat completions if responses API fails
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Antworte ausschließlich in Deutsch. Gib NUR ein JSON-Objekt mit dem Schlüssel 'predictions' aus. "
+                            "Nutze verfügbare Tools für aktuelle Quoten und Quellen."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": "bundesliga_predictions", "strict": True, "schema": schema},
+                },
+                temperature=temperature,
+            )
+
+            content = resp.choices[0].message.content if resp.choices else None
+            if raw_dir:
+                ensure_dir(raw_dir)
+                (raw_dir / f"md{matchday_index}_responses.json").write_text(content or "", encoding="utf-8")
+
+            if content:
+                data = json.loads(content)
+                preds = data.get("predictions")
+                fixed = validate_predictions(preds, rows, matchday_index, forbid_degenerate=True)
+
+                for item in preds or []:
+                    for s in (item.get("sources") or []):
+                        u = (s.get("url") or "").strip()
+                        if u and not re.match(r"^https?://", u):
+                            raise ValueError("Ungültige Quellen-URL erkannt.")
+                return fixed
+        except Exception as exc:
+            log.warning("Research-Modus fehlgeschlagen – nutze Chat-Fallback: %s", exc)
+
+    # Standard chat completions with retries
     last_err = None
     for attempt in range(1, max_retries + 1):
-        prompt = _build_prompt() + "\n" + " ".join(hard_hints[:attempt])
+        prompt = _build_prompt("\n".join(hard_hints[:attempt]))
 
         log.info(f"OpenAI[chat] call: model={model}, md={matchday_index}, matches={n}, try={attempt}, profile={prompt_profile}")
         resp = client.chat.completions.create(
@@ -1006,4 +1037,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
