@@ -1,4 +1,7 @@
-# Kicktipp-GPT Bot
+# Kicktipp-GPT Bot - OpenAI Edition
+
+> **⚠️ Experimentelles Vibe-Coding-Projekt**
+> Diese Implementation wurde **vollständig durch KI-gestützte Entwicklung** erstellt. Code, Architektur und diese Dokumentation sind das Ergebnis von AI-Pair-Programming-Sessions. Keine Garantie für Korrektheit oder Stabilität!
 
 Automatisierte Tippabgabe für Kicktipp-Spielrunden mit einer OpenAI-gestützten
 Prognose-Pipeline. Das Projekt sammelt die offenen Spiele eines Spieltages,
@@ -301,4 +304,14 @@ fixed = validate_predictions(preds, rows, matchday_index, forbid_degenerate=True
 ## Haftungsausschluss
 
 Dieses Projekt ist ein praktischer Automations‑Prototyp. Fußball ist stochastisch; **keine** Vorhersage ist garantiert richtig. Benutzung **auf eigene Verantwortung**.
+
+---
+
+## 🤖 Entwicklungsmethodik
+
+**Vibe Coding / AI-Pair-Programming:**
+- Code vollständig durch KI generiert (Claude Sonnet 4.5)
+- Dokumentation AI-geschrieben
+- Menschliche Rolle: Vision, Testing, Feedback
+- Status: Experimentelles Projekt zur Erforschung von AI-gestützter Softwareentwicklung
 

@@ -1,5 +1,8 @@
 # Kicktipp-GPT Bot - Claude Sonnet 4.5 Edition
 
+> **⚠️ Experimentelles Vibe-Coding-Projekt**
+> Diese Implementation wurde **vollständig durch KI-gestützte Entwicklung** erstellt. Code, Prompts, Architektur und diese Dokumentation sind das Ergebnis von AI-Pair-Programming-Sessions. Keine Garantie für Korrektheit oder Stabilität!
+
 Professionelle automatisierte Tippabgabe für Kicktipp-Spielrunden mit **Anthropic Claude Sonnet 4.5**. Diese Version nutzt modernste KI-Technologie mit optimierten Prompts für maximale Vorhersagegenauigkeit.
 
 ## 🎯 Projektübersicht
@@ -698,17 +701,21 @@ cp -r out/raw_claude/ archive/2025-26/
 
 ## 🔒 Sicherheit
 
-### Zugangsdaten
+### Configuration Setup
 
-**DO:**
-- ✅ `config.ini` in `.gitignore`
-- ✅ Umgebungsvariablen für CI/CD
+**Setup-Schritte:**
+1. Kopiere `config.ini.example` zu `config.ini`
+2. Fülle deine persönlichen Credentials ein:
+   - **Anthropic API Key** - Von: https://console.anthropic.com
+   - **Kicktipp Login** - Deine persönlichen Zugangsdaten
+3. `config.ini` ist bereits in `.gitignore` und bleibt lokal
+
+**Best Practices:**
+- ✅ `config.ini` bleibt lokal (bereits in `.gitignore`)
+- ✅ Umgebungsvariablen für CI/CD nutzen
 - ✅ Separate Test-Accounts für Entwicklung
-
-**DON'T:**
-- ❌ Credentials in Code hardcoden
-- ❌ Config-Dateien committen
-- ❌ API Keys in Logs ausgeben (Masking aktiv)
+- ✅ API Keys regelmäßig rotieren
+- ❌ Credentials niemals in Code hardcoden
 
 ### API-Limits
 
@@ -751,11 +758,19 @@ Bei Problemen:
 ---
 
 **Version:** 1.1.0 (Oktober 2025)
-**Autor:** AI-Assisted Development
-**Status:** Production-Ready
+**Entwicklung:** 100% Vibe Coding / AI-Pair-Programming
+**Status:** Experimentell
+
+**Entwicklungsmethodik:**
+- **Code**: Vollständig durch Claude Sonnet 4.5 generiert
+- **Dokumentation**: AI-geschrieben und strukturiert
+- **Prompts**: Iterativ optimiert durch KI-Feedback
+- **Testing**: Menschliche Validierung & Quality Control
 
 **Letzte Änderungen:**
 - ✅ Parser-Bugfix: Datum/Zeit-Filter
 - ✅ Prompt-Optimierung: Natürlicher Stil
 - ✅ Extended Thinking: Optional
 - ✅ Temperature: Default 0.7
+
+**Disclaimer:** Dieses Projekt ist ein Experiment zur Erforschung der Möglichkeiten von AI-gestützter Softwareentwicklung. Keine Garantie für Funktionalität oder Genauigkeit!

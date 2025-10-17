@@ -1,5 +1,8 @@
 # Kicktipp-GPT Bot - Multi-Model Edition
 
+> **⚠️ Experimentelles Vibe-Coding-Projekt**
+> Dieses gesamte Projekt – einschließlich Code, Architektur, Prompts und Dokumentation – wurde **vollständig durch KI-gestützte Vibe-Coding-Sessions** erstellt. Es handelt sich um ein **experimentelles Projekt** zur Erforschung der Möglichkeiten von AI-Pair-Programming und automatisierter Fußball-Vorhersage. Keine Garantie für Funktionalität, Genauigkeit oder Stabilität. Nutzung auf eigene Gefahr!
+
 Automatisierte Tippabgabe für Kicktipp-Spielrunden mit KI-gestützter Prognose-Pipeline. Dieses Projekt bietet **zwei Implementierungen** mit modernsten Large Language Models:
 
 ## 🆕 Zwei Versionen verfügbar!
@@ -379,8 +382,18 @@ lines.append("### 3. NEWS & KADERSITUATION (Gewichtung: 20%)")  # Reduziert von 
 
 ## 🔒 Sicherheit & Compliance
 
-- **Zugangsdaten**: Nur in `config.ini` oder ENV (niemals committen!)
-- **API Keys**: Separat für Claude und OpenAI
+### Configuration Setup
+
+**Setup:**
+1. Kopiere `config.ini.example` zu `config.ini` im jeweiligen Ordner (claude/ oder openai/)
+2. Fülle deine persönlichen Credentials ein:
+   - **OpenAI API Key** - Von: https://platform.openai.com/api-keys
+   - **Anthropic API Key** - Von: https://console.anthropic.com
+   - **Kicktipp Login** - Deine persönlichen Zugangsdaten
+3. `config.ini` ist bereits in `.gitignore` und bleibt lokal
+
+### Compliance
+
 - **Rate Limiting**: Sequentielle Verarbeitung, built-in timeouts
 - **Audit Trail**: Alle Responses gespeichert für Debugging
 - **Wett-Compliance**: Prognosen sind statistische Schätzungen, keine Garantien
@@ -446,13 +459,25 @@ Dieses Projekt ist ein Automations-Prototyp für Bildungszwecke. Fußball ist st
 
 Die Nutzung erfolgt im Rahmen der Kicktipp-Nutzungsbedingungen. Keine Gewinngarantie. Kein Wettanreiz.
 
-## 🌟 Credits
+## 🌟 Credits & Entwicklung
 
-- **Claude Sonnet 4.5**: [Anthropic](https://www.anthropic.com)
-- **OpenAI GPT-5**: [OpenAI](https://openai.com)
+### Technologie-Stack
+- **Claude Sonnet 4.5**: [Anthropic](https://www.anthropic.com) - Reasoning & Extended Thinking
+- **OpenAI GPT-5**: [OpenAI](https://openai.com) - Alternative Implementation
 - **Web Search**: DuckDuckGo (Claude), OpenAI Built-in
 - **Kicktipp**: [kicktipp.de](https://www.kicktipp.de)
 
+### Entwicklungsmethodik
+
+Dieses Projekt ist ein **Experiment in KI-gestützter Softwareentwicklung**:
+
+- **100% Vibe Coding**: Der gesamte Code wurde durch iterative AI-Pair-Programming-Sessions erstellt
+- **AI-Generated Documentation**: Alle Markdown-Dateien, Prompts und Kommentare wurden von KI geschrieben
+- **Entwicklungstools**: Claude Code, Anthropic Claude Sonnet 4.5
+- **Menschliche Rolle**: Produktvision, Testing, Feedback, Quality Control
+
+**Ziel des Experiments:** Demonstrieren der Möglichkeiten und Grenzen von AI-gestützter Softwareentwicklung in einem realen, funktionalen Projekt.
+
 ---
 
-**Made with ⚽ + 🤖 for reaching 🥇**
+**Made with ⚽ + 🤖 through Vibe Coding for reaching 🥇**
