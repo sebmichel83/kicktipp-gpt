@@ -1,0 +1,83 @@
+[
+  {
+    "row_index": 1,
+    "matchday": 9,
+    "home_team": "FC Augsburg",
+    "away_team": "Borussia Dortmund",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 3,
+    "reason": "BVB in starker Form mit 4 Siegen aus 5 Spielen. Augsburg schwach zu Hause (nur 3 Punkte). Dortmunds Offensive um Füllkrug/Adeyemi zu stark für FCA-Defensive."
+  },
+  {
+    "row_index": 2,
+    "matchday": 9,
+    "home_team": "FSV Mainz 05",
+    "away_team": "Werder Bremen",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 2,
+    "reason": "Beide Teams offensivstark aber defensivschwach. Mainz 10 Gegentore, Bremen 12 Gegentore in letzten 4 Spielen. Ausgeglichene Bilanz spricht für Remis."
+  },
+  {
+    "row_index": 3,
+    "matchday": 9,
+    "home_team": "1. FC Heidenheim 1846",
+    "away_team": "Eintracht Frankfurt",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 2,
+    "reason": "Frankfurt in Top-Form (Platz 3), starke Offensive mit Marmoush. Heidenheim durch Europa League belastet, nur 1 Sieg aus letzten 5 Spielen."
+  },
+  {
+    "row_index": 4,
+    "matchday": 9,
+    "home_team": "FC St. Pauli",
+    "away_team": "Bor. Mönchengladbach",
+    "predicted_home_goals": 0,
+    "predicted_away_goals": 2,
+    "reason": "St. Pauli Tabellenletzter ohne Heimsieg. Gladbach mit 3 Siegen aus 4 Spielen in guter Form. Offensivpower von Plea/Honorat entscheidend."
+  },
+  {
+    "row_index": 5,
+    "matchday": 9,
+    "home_team": "RB Leipzig",
+    "away_team": "VfB Stuttgart",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 1,
+    "reason": "Leipzig zu Hause stark (3 Heimsiege). Stuttgart auswärtsschwach und durch CL belastet. Openda/Sesko treffen gegen anfällige VfB-Defensive."
+  },
+  {
+    "row_index": 6,
+    "matchday": 9,
+    "home_team": "1. FC Union Berlin",
+    "away_team": "SC Freiburg",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 1,
+    "reason": "Beide Teams im Mittelfeld mit ähnlicher Form. Union stark zu Hause, Freiburg solide auswärts. Taktisch ausgeglichenes Duell spricht für Punkteteilung."
+  },
+  {
+    "row_index": 7,
+    "matchday": 9,
+    "home_team": "FC Bayern München",
+    "away_team": "Bayer 04 Leverkusen",
+    "predicted_home_goals": 3,
+    "predicted_away_goals": 2,
+    "reason": "Topspiel! Bayern zu Hause dominant (21:4 Tore). Leverkusen mit Defensivproblemen (9 Gegentore letzte 3 Spiele). Hochklassiges Offensivspektakel erwartet."
+  },
+  {
+    "row_index": 8,
+    "matchday": 9,
+    "home_team": "1. FC Köln",
+    "away_team": "Hamburger SV",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 2,
+    "reason": "2. Liga-Derby! HSV Tabellenführer in Topform. Köln kämpft im Mittelfeld. Hamburg mit besserer Offensive (Glatzel/Königsdörffer) setzt sich durch."
+  },
+  {
+    "row_index": 9,
+    "matchday": 9,
+    "home_team": "VfL Wolfsburg",
+    "away_team": "1899 Hoffenheim",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 0,
+    "reason": "Wolfsburg mit 3 Siegen aus 4 Spielen aufwärts. Hoffenheim in Krise (4 Niederlagen), auswärtsschwach. Wind/Nmecha nutzen TSG-Defensivschwäche aus."
+  }
+]

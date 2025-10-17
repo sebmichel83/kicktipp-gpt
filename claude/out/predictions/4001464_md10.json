@@ -1,0 +1,83 @@
+[
+  {
+    "row_index": 1,
+    "matchday": 10,
+    "home_team": "Werder Bremen",
+    "away_team": "VfL Wolfsburg",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 2,
+    "reason": "Beide Teams im Mittelfeld (Bremen 9., Wolfsburg 12.). Ausgeglichene Form, torreiches Duell erwartet. Wolfsburg auswärts schwach, Bremen zu Hause stark."
+  },
+  {
+    "row_index": 2,
+    "matchday": 10,
+    "home_team": "1899 Hoffenheim",
+    "away_team": "RB Leipzig",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 3,
+    "reason": "Leipzig (2.) in Topform mit starker Offensive. Hoffenheim (15.) in Abstiegsnähe mit defensiven Problemen. Leipzig auswärts sehr effektiv."
+  },
+  {
+    "row_index": 3,
+    "matchday": 10,
+    "home_team": "Hamburger SV",
+    "away_team": "Borussia Dortmund",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 2,
+    "reason": "HSV kämpft um Aufstieg (2. Liga), BVB (4.) mit Qualitätsvorsprung. Dortmund unter Druck nach schwankenden Leistungen, setzt sich knapp durch."
+  },
+  {
+    "row_index": 4,
+    "matchday": 10,
+    "home_team": "1. FC Union Berlin",
+    "away_team": "FC Bayern München",
+    "predicted_home_goals": 0,
+    "predicted_away_goals": 3,
+    "reason": "Bayern (1.) Tabellenführer mit bester Offensive. Union (13.) schwache Heimform. Bayern dominiert auch auswärts souverän."
+  },
+  {
+    "row_index": 5,
+    "matchday": 10,
+    "home_team": "Bayer 04 Leverkusen",
+    "away_team": "1. FC Heidenheim 1846",
+    "predicted_home_goals": 3,
+    "predicted_away_goals": 1,
+    "reason": "Leverkusen (3.) Titelverteidiger mit starker Heimstärke. Heidenheim (16.) Abstiegskandidat. Leverkusen nach Europacup-Belastung dennoch überlegen."
+  },
+  {
+    "row_index": 6,
+    "matchday": 10,
+    "home_team": "Bor. Mönchengladbach",
+    "away_team": "1. FC Köln",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 0,
+    "reason": "Rheinderby! Gladbach (10.) stabiler als Köln (17./2. Liga). Heimvorteil entscheidend, Gladbach nutzt Derbymotivation."
+  },
+  {
+    "row_index": 7,
+    "matchday": 10,
+    "home_team": "SC Freiburg",
+    "away_team": "FC St. Pauli",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 1,
+    "reason": "Freiburg (6.) solide Heimmannschaft. St. Pauli (14.) Aufsteiger mit Auswärtsschwäche. Freiburg kontrolliert das Spiel."
+  },
+  {
+    "row_index": 8,
+    "matchday": 10,
+    "home_team": "VfB Stuttgart",
+    "away_team": "FC Augsburg",
+    "predicted_home_goals": 3,
+    "predicted_away_goals": 2,
+    "reason": "Stuttgart (7.) offensivstark zu Hause. Augsburg (11.) defensiv anfällig. Torreiches Spiel, Stuttgart setzt sich durch."
+  },
+  {
+    "row_index": 9,
+    "matchday": 10,
+    "home_team": "Eintracht Frankfurt",
+    "away_team": "FSV Mainz 05",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 1,
+    "reason": "Frankfurt (5.) nach Europacup-Erfolgen stark. Mainz (8.) solider Gegner. Heimvorteil und Qualität geben Frankfurt den Sieg."
+  }
+]

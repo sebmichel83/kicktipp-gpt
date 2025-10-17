@@ -1,0 +1,94 @@
+{
+  "matchday": 7,
+  "tippsaison_id": "4001464",
+  "rows": [
+    {
+      "index": 1,
+      "home_team": "VfL Wolfsburg",
+      "away_team": "VfB Stuttgart",
+      "home_field": "spieltippForms[1451159670].heimTipp",
+      "away_field": "spieltippForms[1451159670].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 2,
+      "home_team": "1. FC Köln",
+      "away_team": "FC Augsburg",
+      "home_field": "spieltippForms[1451159667].heimTipp",
+      "away_field": "spieltippForms[1451159667].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 3,
+      "home_team": "FSV Mainz 05",
+      "away_team": "Bayer 04 Leverkusen",
+      "home_field": "spieltippForms[1451159664].heimTipp",
+      "away_field": "spieltippForms[1451159664].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 4,
+      "home_team": "1. FC Heidenheim 1846",
+      "away_team": "Werder Bremen",
+      "home_field": "spieltippForms[1451159665].heimTipp",
+      "away_field": "spieltippForms[1451159665].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 5,
+      "home_team": "RB Leipzig",
+      "away_team": "Hamburger SV",
+      "home_field": "spieltippForms[1451159663].heimTipp",
+      "away_field": "spieltippForms[1451159663].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 6,
+      "home_team": "FC Bayern München",
+      "away_team": "Borussia Dortmund",
+      "home_field": "spieltippForms[1451159669].heimTipp",
+      "away_field": "spieltippForms[1451159669].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 7,
+      "home_team": "SC Freiburg",
+      "away_team": "Eintracht Frankfurt",
+      "home_field": "spieltippForms[1451159666].heimTipp",
+      "away_field": "spieltippForms[1451159666].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 8,
+      "home_team": "FC St. Pauli",
+      "away_team": "1899 Hoffenheim",
+      "home_field": "spieltippForms[1451159662].heimTipp",
+      "away_field": "spieltippForms[1451159662].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    }
+  ]
+}

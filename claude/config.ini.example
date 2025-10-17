@@ -1,0 +1,22 @@
+[auth]
+username = dein.loginname
+password = dein.passwort
+
+[pool]
+pool_slug = group-name
+
+[anthropic]
+api_key = sk-ant-...
+model = claude-sonnet-4-5-20250929
+temperature = 0.7  # 0.5-0.8 empfohlen (wird auf 1.0 gesetzt wenn Extended Thinking aktiv)
+timeout = 180
+max_retries = 3
+use_extended_thinking = false  # true = tieferes Reasoning (langsamer), false = schneller & fokussierter (empfohlen)
+
+[run]
+start_index = 1
+end_index   = 34
+no_submit   = false
+
+[settings]
+# proxy = http://127.0.0.1:8080

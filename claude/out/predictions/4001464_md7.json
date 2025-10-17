@@ -1,0 +1,74 @@
+[
+  {
+    "row_index": 1,
+    "matchday": 7,
+    "home_team": "VfL Wolfsburg",
+    "away_team": "VfB Stuttgart",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 2,
+    "reason": "Stuttgart in starker Form (Platz 3), Wolfsburg schwächelt zuhause. Stuttgarts Offensive um Guirassy dominiert, Wolfsburg ohne Wind verletzungsanfällig."
+  },
+  {
+    "row_index": 2,
+    "matchday": 7,
+    "home_team": "1. FC Köln",
+    "away_team": "FC Augsburg",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 1,
+    "reason": "Beide Teams im Tabellenmittelfeld, ausgeglichene Form. Köln defensiv stabil, Augsburg auswärts kompakt. Typisches Unentschieden-Spiel."
+  },
+  {
+    "row_index": 3,
+    "matchday": 7,
+    "home_team": "FSV Mainz 05",
+    "away_team": "Bayer 04 Leverkusen",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 3,
+    "reason": "Leverkusen Tabellenführer mit überragender Offensive (Wirtz, Boniface). Mainz kämpferisch, aber qualitativ unterlegen. Xabi Alonsos Team zu stark."
+  },
+  {
+    "row_index": 4,
+    "matchday": 7,
+    "home_team": "1. FC Heidenheim 1846",
+    "away_team": "Werder Bremen",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 2,
+    "reason": "Heidenheim zuhause stark, Bremen offensiv gefährlich aber defensiv anfällig. Beide Teams torfreudig, offener Schlagabtausch erwartet."
+  },
+  {
+    "row_index": 5,
+    "matchday": 7,
+    "home_team": "RB Leipzig",
+    "away_team": "Hamburger SV",
+    "predicted_home_goals": 3,
+    "predicted_away_goals": 0,
+    "reason": "Leipzig Top-Team (Platz 2), HSV in 2. Liga. Klassenunterschied deutlich. Openda und Werner treffen gegen überforderte HSV-Defensive."
+  },
+  {
+    "row_index": 6,
+    "matchday": 7,
+    "home_team": "FC Bayern München",
+    "away_team": "Borussia Dortmund",
+    "predicted_home_goals": 3,
+    "predicted_away_goals": 2,
+    "reason": "Klassiker! Bayern zuhause dominant, Kane in Topform. BVB offensiv stark aber defensiv wacklig. Torreiches Spitzenspiel, Bayern knapp vorn."
+  },
+  {
+    "row_index": 7,
+    "matchday": 7,
+    "home_team": "SC Freiburg",
+    "away_team": "Eintracht Frankfurt",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 1,
+    "reason": "Freiburg konstant stark zuhause, Europa-League-Belastung für Frankfurt. Grifo in Form, Freiburgs Heimstärke entscheidend."
+  },
+  {
+    "row_index": 8,
+    "matchday": 7,
+    "home_team": "FC St. Pauli",
+    "away_team": "1899 Hoffenheim",
+    "predicted_home_goals": 0,
+    "predicted_away_goals": 2,
+    "reason": "St. Pauli Aufsteiger mit Bundesliga-Problemen, Hoffenheim qualitativ überlegen. Kramaric und Beier nutzen Pauli-Schwächen aus."
+  }
+]

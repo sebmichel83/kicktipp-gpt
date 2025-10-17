@@ -1,0 +1,83 @@
+[
+  {
+    "row_index": 1,
+    "matchday": 8,
+    "home_team": "Werder Bremen",
+    "away_team": "1. FC Union Berlin",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 1,
+    "reason": "Bremen zeigt Heimstärke (2 Siege), Union auswärts schwach. Bremens Offensive um Ducksch trifft auf Unions anfällige Defensive. Heimvorteil entscheidend."
+  },
+  {
+    "row_index": 2,
+    "matchday": 8,
+    "home_team": "1899 Hoffenheim",
+    "away_team": "1. FC Heidenheim 1846",
+    "predicted_home_goals": 3,
+    "predicted_away_goals": 2,
+    "reason": "Offensivstarke Teams (beide >1.5 Tore/Spiel). Hoffenheim mit Kramaric gefährlich, Heidenheim kämpferisch aber defensiv anfällig. Torreicher Schlagabtausch erwartet."
+  },
+  {
+    "row_index": 3,
+    "matchday": 8,
+    "home_team": "FC Augsburg",
+    "away_team": "RB Leipzig",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 3,
+    "reason": "Leipzig in Top-Form mit Openda/Sesko. Augsburg heimschwach, Leipzig auswärtsstark. Qualitätsunterschied deutlich, Leipzig holt drei Punkte."
+  },
+  {
+    "row_index": 4,
+    "matchday": 8,
+    "home_team": "Bor. Mönchengladbach",
+    "away_team": "FC Bayern München",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 3,
+    "reason": "Bayern dominiert H2H. Kane in Torlaune, Gladbach offensiv aber defensiv löchrig. Bayerns Qualität setzt sich knapp durch, torreiches Spiel."
+  },
+  {
+    "row_index": 5,
+    "matchday": 8,
+    "home_team": "Hamburger SV",
+    "away_team": "VfL Wolfsburg",
+    "predicted_home_goals": 1,
+    "predicted_away_goals": 1,
+    "reason": "Ausgeglichenes Duell. HSV heimstark, Wolfsburg solide auswärts. Beide Teams in Mittelfeld, taktisch ausgeglichen. Remis wahrscheinlich."
+  },
+  {
+    "row_index": 6,
+    "matchday": 8,
+    "home_team": "Eintracht Frankfurt",
+    "away_team": "FC St. Pauli",
+    "predicted_home_goals": 3,
+    "predicted_away_goals": 0,
+    "reason": "Frankfurt Europacup-Form, St. Pauli Aufsteiger mit Problemen. Marmoush/Ekitiké gefährlich. Klarer Heimsieg, St. Pauli überfordert."
+  },
+  {
+    "row_index": 7,
+    "matchday": 8,
+    "home_team": "Borussia Dortmund",
+    "away_team": "1. FC Köln",
+    "predicted_home_goals": 4,
+    "predicted_away_goals": 1,
+    "reason": "BVB heimstark mit Füllkrug/Adeyemi. Köln Abstiegskandidat, auswärts schwach. Qualitätsunterschied enorm, deutlicher BVB-Sieg erwartet."
+  },
+  {
+    "row_index": 8,
+    "matchday": 8,
+    "home_team": "Bayer 04 Leverkusen",
+    "away_team": "SC Freiburg",
+    "predicted_home_goals": 2,
+    "predicted_away_goals": 2,
+    "reason": "Topspiel! Leverkusen ungeschlagen, Freiburg kompakt. Wirtz vs Grifo. Freiburg kann kontern, Leverkusen dominant. Spannendes Remis."
+  },
+  {
+    "row_index": 9,
+    "matchday": 8,
+    "home_team": "VfB Stuttgart",
+    "away_team": "FSV Mainz 05",
+    "predicted_home_goals": 3,
+    "predicted_away_goals": 1,
+    "reason": "Stuttgart offensivstark (Guirassy/Führich), Mainz inkonstant. VfB nutzt Heimvorteil, zu stark für Mainz. Klarer Heimsieg."
+  }
+]

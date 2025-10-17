@@ -1,0 +1,105 @@
+{
+  "matchday": 11,
+  "tippsaison_id": "4001464",
+  "rows": [
+    {
+      "index": 1,
+      "home_team": "21.11.25 20:30",
+      "away_team": "FSV Mainz 05",
+      "home_field": "spieltippForms[1451159704].heimTipp",
+      "away_field": "spieltippForms[1451159704].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 2,
+      "home_team": "22.11.25 15:30",
+      "away_team": "FC Augsburg",
+      "home_field": "spieltippForms[1451159700].heimTipp",
+      "away_field": "spieltippForms[1451159700].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 3,
+      "home_team": "Borussia Dortmund",
+      "away_team": "VfB Stuttgart",
+      "home_field": "spieltippForms[1451159698].heimTipp",
+      "away_field": "spieltippForms[1451159698].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 4,
+      "home_team": "FC Bayern München",
+      "away_team": "SC Freiburg",
+      "home_field": "spieltippForms[1451159699].heimTipp",
+      "away_field": "spieltippForms[1451159699].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 5,
+      "home_team": "1. FC Heidenheim 1846",
+      "away_team": "Bor. Mönchengladbach",
+      "home_field": "spieltippForms[1451159705].heimTipp",
+      "away_field": "spieltippForms[1451159705].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 6,
+      "home_team": "VfL Wolfsburg",
+      "away_team": "Bayer 04 Leverkusen",
+      "home_field": "spieltippForms[1451159701].heimTipp",
+      "away_field": "spieltippForms[1451159701].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 7,
+      "home_team": "22.11.25 18:30",
+      "away_team": "1. FC Köln",
+      "home_field": "spieltippForms[1451159706].heimTipp",
+      "away_field": "spieltippForms[1451159706].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 8,
+      "home_team": "23.11.25 15:30",
+      "away_team": "RB Leipzig",
+      "home_field": "spieltippForms[1451159703].heimTipp",
+      "away_field": "spieltippForms[1451159703].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    },
+    {
+      "index": 9,
+      "home_team": "23.11.25 17:30",
+      "away_team": "FC St. Pauli",
+      "home_field": "spieltippForms[1451159702].heimTipp",
+      "away_field": "spieltippForms[1451159702].gastTipp",
+      "open": true,
+      "home_odds": null,
+      "draw_odds": null,
+      "away_odds": null
+    }
+  ]
+}
